@@ -1,6 +1,6 @@
 streamlit
-chromadb>=1.0.7
-streamlit-chromadb-connection
+chromadb==0.4.24  # 0.4.24はchroma-hnswlib==0.7.3と互換
+streamlit-chromadb-connection==0.0.5  # 特定のバージョンを指定
 moviepy==1.0.3
 imageio
 imageio-ffmpeg

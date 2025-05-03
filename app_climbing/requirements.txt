@@ -1,0 +1,12 @@
+streamlit
+moviepy
+opencv-python-headless
+numpy
+langchain-openai
+langchain-community
+langchain-core
+langchain
+chromadb
+# snowflake-connector-python[pandas] # ChromaDBを使用するため不要
+openai
+tiktoken 

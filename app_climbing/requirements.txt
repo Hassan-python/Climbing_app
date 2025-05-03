@@ -1,6 +1,6 @@
 streamlit
-chromadb==0.4.18  # streamlit-chromadb-connection==0.0.5と互換
-streamlit-chromadb-connection==0.0.5
+chromadb==0.5.3
+streamlit-chromadb-connection==1.0.5
 moviepy==1.0.3
 imageio
 imageio-ffmpeg

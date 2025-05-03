@@ -1,12 +1,15 @@
 streamlit
-moviepy
+chromadb>=1.0.7
+streamlit-chromadb-connection
+moviepy==1.0.3
+imageio
+imageio-ffmpeg
 opencv-python-headless
 numpy
 langchain-openai
 langchain-community
 langchain-core
 langchain
-chromadb
-# snowflake-connector-python[pandas] # ChromaDBを使用するため不要
 openai
-tiktoken 
+tiktoken
+# snowflake-connector-python[pandas] # ChromaDBを使用するため不要 

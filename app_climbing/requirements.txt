@@ -12,5 +12,5 @@ langchain-core
 langchain
 openai
 tiktoken
-fastapi==0.111.1  # uvloopを要求しないバージョン
+fastapi==0.104.1  # streamlit-chromadb-connectionと互換
 # snowflake-connector-python[pandas] # ChromaDBを使用するため不要 

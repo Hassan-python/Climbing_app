@@ -1,0 +1,43 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# IDE/Editor folders
+.vscode/
+.idea/
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Streamlit secrets
+/.streamlit/secrets.toml # ルートに移動した場合も想定
+app_climbing/.streamlit/secrets.toml
+
+# Local data and temp files
+chroma_db/  # 古い名前も残す
+.chroma/    # ChromaDBデータ
+temp_videos/
+*.log
+*.tmp
+*.sqlite3 # DBファイル
+
+# Environment variables
+.env*
+
+# Irrelevant project folders (add others as needed)
+new_func_get_stamp_info_v1/
+new_func_get_stamp_info_v2/
+app_get_account_infomation/
+app_get_katakana_area/
+app_get_stamp/
+app_preedit_stamp/
+app_preedit_stamp_ocr/
+app_simple_OCR/
+backup_app_get_stamp/
+backups/
+test/
+app_change_katakana/ 

@@ -329,15 +329,25 @@ if uploaded_file is not None:
                         cols = st.columns(len(chunk)) # チャンクの要素数で列を作成
                         for i, frame in enumerate(chunk):
                             with cols[i]: # 対応する列に画像を表示
-                                rotated_frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
-                                # より安全なインデックス取得 (enumerateの結果を利用)
-                                global_index = chunk_index * cols_per_row + i
-                                st.image(
-                                    rotated_frame, 
-                                    caption=f"フレーム {global_index + 1} (回転後)", 
-                                    channels="BGR", 
-                                    use_container_width=True
-                                )
+                                # ---- 追加: frame が None でないかチェック ----
+                                if frame is not None:
+                                    try:
+                                        rotated_frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+                                        # より安全なインデックス取得 (enumerateの結果を利用)
+                                        global_index = chunk_index * cols_per_row + i
+                                        st.image(
+                                            rotated_frame, 
+                                            caption=f"フレーム {global_index + 1} (回転後)", 
+                                            channels="BGR", 
+                                            use_container_width=True
+                                        )
+                                    except Exception as e:
+                                        # 回転や表示で予期せぬエラーが起きた場合
+                                        st.warning(f"フレーム {chunk_index * cols_per_row + i + 1} の表示中にエラー: {e}")
+                                else:
+                                    # frame が None だった場合
+                                    st.warning(f"フレーム {chunk_index * cols_per_row + i + 1} は無効です。")
+                                # -----------------------------------------
                     # -----------------------------------
 
                     # --- RAG分析の実行 (ChromaDB使用) ---

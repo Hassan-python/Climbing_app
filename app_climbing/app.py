@@ -379,85 +379,73 @@ uploaded_file = st.file_uploader("分析したいボルダリング動画（MP4,
 
 # --- ファイルアップロード後の処理 --- (session state を使うように変更)
 if uploaded_file is not None:
-    # --- 読み込み中メッセージ用プレースホルダー ---
-    processing_message = st.empty()
-    processing_message.info("動画情報を読み込み中...")
 
-    # 以前のファイルと違うか、または状態が未設定ならリセット
-    # if uploaded_file.name != st.session_state.get('uploaded_file_name'): # getで安全にアクセス
-    # ファイル名比較は getvalue 後に行う方が安全かもしれない
-    new_upload = uploaded_file.name != st.session_state.get('uploaded_file_name')
+    # --- ファイルが新しいか、まだ処理されていないか判定 ---
+    is_new_file = uploaded_file.name != st.session_state.get('uploaded_file_name')
+    needs_processing = is_new_file or st.session_state.get('video_duration') is None
 
-    # --- 動画データの処理 (バイトデータの取得と一時ファイル作成) ---
-    temp_file_path = None
-    video_bytes = None # 初期化
-    try:
-        # バイトデータの取得 (毎回読み直す)
-        video_bytes = uploaded_file.getvalue()
-        st.session_state.video_bytes = video_bytes # Stateにも保存
+    # --- ファイル処理が必要な場合のみ実行 --- (バイトデータ取得、一時ファイル作成、動画長取得)
+    if needs_processing:
+        processing_message = st.empty()
+        processing_message.info("動画情報を読み込み中...")
+        temp_file_path = None
+        try:
+            video_bytes = uploaded_file.getvalue()
+            st.session_state.video_bytes = video_bytes
 
-        # 新しいファイルがアップロードされた場合のリセット処理
-        if new_upload:
-            st.session_state.uploaded_file_name = uploaded_file.name
-            st.session_state.video_duration = None
-            st.session_state.start_time = 0.0
-            st.session_state.analysis_result = None
-            st.session_state.analysis_sources = []
-            st.session_state.problem_type = "" # リセット
-            st.session_state.crux = "" # リセット
+            # 新しいファイルの場合、関連 state をリセット
+            if is_new_file:
+                st.session_state.uploaded_file_name = uploaded_file.name
+                st.session_state.video_duration = None # duration をリセット対象に
+                st.session_state.start_time = 0.0
+                st.session_state.analysis_result = None
+                st.session_state.analysis_sources = []
+                st.session_state.problem_type = ""
+                st.session_state.crux = ""
 
-        # 一時ファイルの準備
-        if video_bytes:
-            if not os.path.exists(TEMP_VIDEO_DIR):
-                os.makedirs(TEMP_VIDEO_DIR)
-            # ファイル名は state から取得
-            temp_file_path = os.path.join(TEMP_VIDEO_DIR, st.session_state.uploaded_file_name)
-            with open(temp_file_path, "wb") as f:
-                f.write(video_bytes)
+            # 一時ファイルの準備
+            if video_bytes:
+                if not os.path.exists(TEMP_VIDEO_DIR):
+                    os.makedirs(TEMP_VIDEO_DIR)
+                temp_file_path = os.path.join(TEMP_VIDEO_DIR, st.session_state.uploaded_file_name)
+                with open(temp_file_path, "wb") as f:
+                    f.write(video_bytes)
 
-            # --- 動画長の取得 (duration が None の場合のみ実行) ---
-            if st.session_state.video_duration is None:
-                if os.path.exists(temp_file_path):
-                    with VideoFileClip(temp_file_path) as clip:
-                        st.session_state.video_duration = clip.duration
-                else:
-                     st.session_state.video_duration = 0 # 一時ファイル作成失敗など
-        else:
-            st.session_state.video_duration = 0 # バイトデータなし
+                # 動画長の取得 (stateがNoneの場合のみ)
+                if st.session_state.video_duration is None:
+                    if os.path.exists(temp_file_path):
+                        with VideoFileClip(temp_file_path) as clip:
+                            st.session_state.video_duration = clip.duration
+                    else:
+                        st.session_state.video_duration = 0
+            else:
+                st.session_state.video_duration = 0
 
-    except Exception as e:
-        # 読み込み中や処理中にエラーが発生した場合
-        processing_message.error(f"動画ファイルの処理中にエラーが発生しました: {e}")
-        st.session_state.video_duration = None # エラー時は None にして後続処理を防ぐ
-        # st.stop() は try-finally の前に実行すると finally が呼ばれない可能性があるので注意
-        # ここで処理を止めたい場合は、後続の video_duration is None チェックで止める
-    finally:
-        # 読み込み中メッセージを消去
-        processing_message.empty()
+        except Exception as e:
+            processing_message.error(f"動画ファイルの処理中にエラーが発生しました: {e}")
+            st.session_state.video_duration = None # エラー時はNone
+        finally:
+            processing_message.empty()
 
-    # --- 動画長取得後の処理 ---
-    video_duration = st.session_state.video_duration
+    # --- 常に state から値を取得 --- (ファイル処理後または処理スキップ後)
+    video_duration = st.session_state.get('video_duration')
+    temp_file_path = None # 一時ファイルパスは毎回再構築する方が安全か検討
+    if st.session_state.get('uploaded_file_name'):
+         temp_file_path = os.path.join(TEMP_VIDEO_DIR, st.session_state.uploaded_file_name)
 
-    # video_duration が None (エラー発生時) でない場合のみ処理
+    # --- UI表示ロジック --- (ファイル処理が成功し、動画長が有効な場合)
     if video_duration is not None:
-        # --- 動画長のチェックとUI表示 ---
         if video_duration > 5.0:
-            # 5秒を超えている場合のエラー表示
             st.error(f"動画の長さ ({video_duration:.2f} 秒) が5秒を超えています。5秒以下の動画をアップロードしてください。")
-            # 必要に応じて関連 state をリセットする処理を追加しても良い
         elif 0 < video_duration <= 5.0 and temp_file_path and os.path.exists(temp_file_path):
-            # 5秒以下の有効な動画の場合のUI表示 (既存のコードをここに移動・内包)
+            # 5秒以下の有効な動画の場合のUI表示
             col1, col2 = st.columns([2, 1])
-
             with col1:
                 st.subheader("動画プレビュー")
-                # st.video の start_time 引数は削除 (シークバー操作の邪魔になるため)
                 st.video(temp_file_path)
-
             with col2:
                 st.subheader("2. 分析設定")
                 st.success(f"動画 '{st.session_state.uploaded_file_name}' ({video_duration:.2f} 秒) をロードしました。")
-
                 # --- ユーザー入力欄 ---
                 st.text_input(
                     "課題の種類 (例: スラブ、強傾斜)",
@@ -468,28 +456,24 @@ if uploaded_file is not None:
                     key="crux",
                     height=100
                 )
-
-                # --- 分析開始時間の設定 (一時的にコメントアウト) ---
-                # current_start_time = st.number_input(
-                #     "分析開始時間 (秒)",
-                #     min_value=0.0,
-                #     max_value=video_duration,
-                #     value=st.session_state.start_time, # 初期値はstateから
-                #     step=0.1,
-                #     format="%.1f",
-                #     help="動画のどの時点から分析を開始するかを指定します。",
-                #     key="start_time_widget"
-                # )
-                # # 値が変わったら state を更新
-                # if current_start_time != st.session_state.start_time:
-                #     st.session_state.start_time = current_start_time
-                #     # プレビューに即時反映させたい場合は rerun するが、一旦不要
-                #     # st.rerun()
-
+                # --- 分析開始時間の設定 (コメントアウト解除) ---
+                current_start_time = st.number_input(
+                    "分析開始時間 (秒)",
+                    min_value=0.0,
+                    max_value=video_duration,
+                    value=st.session_state.start_time, # 初期値はstateから
+                    step=0.1,
+                    format="%.1f",
+                    help="動画のどの時点から分析を開始するかを指定します。",
+                    key="start_time_widget"
+                )
+                # 値が変わったら state を更新
+                if current_start_time != st.session_state.start_time:
+                    st.session_state.start_time = current_start_time
+                    # st.rerun()
                 # 分析終了時間を計算 (1秒固定) - start_time は state から取得
                 end_time = min(st.session_state.start_time + DEFAULT_ANALYSIS_DURATION, video_duration)
-                # st.info(f"分析範囲: **{st.session_state.start_time:.1f} 秒 〜 {end_time:.1f} 秒**") # 関連する情報表示もコメントアウト
-
+                st.info(f"分析範囲: **{st.session_state.start_time:.1f} 秒 〜 {end_time:.1f} 秒**") # 関連する情報表示もコメントアウト解除
                 # --- 分析実行ボタン ---
                 if st.button("分析を開始", type="primary", use_container_width=True):
                     st.session_state.analysis_result = None
@@ -522,9 +506,8 @@ if uploaded_file is not None:
                         else:
                             st.error("フレームの抽出に失敗しました。")
         elif video_duration <= 0:
-             # 動画長が0以下の場合 (既存の警告)
              st.warning("動画情報が正しく読み込めていないか、長さが0秒です。")
-        # else: # temp_file_path がない場合などは暗黙的に何も表示しない
+    # else: (video_duration is None - エラー発生時) メッセージは上記 try-except で表示済
 
 # --- 分析結果の表示 ---
 if st.session_state.analysis_result:
@@ -544,8 +527,8 @@ if st.session_state.analysis_result:
             with st.expander(f"ソース {i+1}: `{source_name}`"):
                 st.text(doc.page_content)
 
-# --- ファイルがアップロードされていない場合の処理 --- (elseブロック修正)
-else: # uploaded_file is None or video_bytes is None (← この条件ではなく uploaded_file is None で判定すべき)
+# --- ファイルがアップロードされていない場合の処理 ---
+else:
     # 以前のファイル情報が残っていればリセット
     if st.session_state.get('uploaded_file_name') is not None:
         st.session_state.video_bytes = None

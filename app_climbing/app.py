@@ -128,22 +128,7 @@ def get_advice_from_frames(frames, openai_api_key, problem_type, crux):
         )
         client = chromadb.HttpClient(host=host, port=port, ssl=ssl_enabled, settings=settings)
 
-        # --- 追加: デフォルトテナントとデータベースの存在を確認/作成 ---
-        try:
-            tenant = client.get_or_create_tenant('default_tenant')
-            database = client.get_or_create_database('default_database', tenant='default_tenant')
-            st.info(f"Ensured tenant '{tenant.name}' and database '{database.name}' exist.")
-        except Exception as db_init_e:
-            st.error(f"Failed to ensure default tenant/database: {db_init_e}")
-            return None, []
-        # ---------------------------------------------------------
-
         # コレクションを取得または作成 (HttpClient経由)
-        # vectorstore = client.get_or_create_collection(
-        #     name=CHROMA_COLLECTION_NAME,
-        #     embedding_function=embeddings # Langchainインテグレーションでは不要な場合あり
-        # )
-        # ↑ LangChainのChromaクラスに直接Clientを渡す
         vectorstore = Chroma(
             client=client, # persist_directory の代わりに client を指定
             collection_name=CHROMA_COLLECTION_NAME,

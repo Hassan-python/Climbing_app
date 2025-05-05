@@ -1,13 +1,20 @@
 import sys
+import importlib # importlib を使う
+
 try:
-    __import__("pysqlite3")
-    sys.modules["sqlite3"] = sys.modules.pop("pysqlite3")
+    # pysqlite3をインポート
+    pysqlite3_module = importlib.import_module("pysqlite3")
+    # インポートしたモジュールを直接 'sqlite3' として登録
+    sys.modules["sqlite3"] = pysqlite3_module
     # Streamlitのログで確認できるように標準出力に追加
-    print("Successfully swapped sqlite3 with pysqlite3")
+    print("Successfully swapped sqlite3 with pysqlite3 using importlib")
 except ImportError:
     # Streamlitのログで確認できるように標準出力に追加
     print("pysqlite3 not found, using system sqlite3.")
     # pysqlite3が見つからない場合のエラーハンドリングをここに追加することも検討
+    pass
+except Exception as e: # 念のため他のエラーもキャッチ
+    print(f"Error during sqlite3 swap: {e}")
     pass
 
 # 必要なライブラリのインポート (chromadbを含む)
@@ -396,15 +403,15 @@ if uploaded_file is not None:
                 "分析開始時間 (秒)",
                 min_value=0.0,
                 max_value=video_duration,
-                value=0.0,  # 初期値
+                value=0.0, # 初期値を0.0に戻す
                 step=0.1,   # 増減ステップ
                 format="%.1f", # 小数点第一位まで表示
-                help="動画のどの時点から分析を開始するかを指定します。"
+                help="動画のどの時点から分析を開始するかを指定します。",
             )
 
             # 分析終了時間を計算 (開始時間+3秒 or 動画の最後)
-            end_time = min(start_time + 3.0, video_duration)
-            st.info(f"分析範囲: **{start_time:.1f} 秒 〜 {end_time:.1f} 秒**") # 分析範囲を表示
+            end_time = min(start_time + 3.0, video_duration) # 3秒固定に戻す
+            st.info(f"分析範囲: **{start_time:.1f} 秒 〜 {end_time:.1f} 秒**") # シンプルな表示に戻す
 
             # --- 分析実行ボタン ---
             if st.button("分析を開始", type="primary", use_container_width=True):
@@ -418,10 +425,10 @@ if uploaded_file is not None:
                 if not openai_api_key or not gemini_api_key:
                     st.error("OpenAI または Gemini の API キーが設定されていません。Secrets を確認してください。")
                 else:
-                    st.info(f"{start_time:.1f}秒から{end_time:.1f}秒までの3秒間分析を開始します...") # 修正後のメッセージ
+                    st.info(f"{start_time:.1f}秒から{end_time:.1f}秒までの3秒間分析を開始します...") # 3秒固定のメッセージに戻す
                     frames = []
                     with st.spinner('フレームを抽出中...'):
-                        frames = extract_frames(temp_file_path, start_time, end_time) # 修正後の呼び出し
+                        frames = extract_frames(temp_file_path, start_time, end_time) # 正しいend_timeを渡す
 
                     if frames:
                         st.success(f"{len(frames)} フレームの抽出に成功しました。")

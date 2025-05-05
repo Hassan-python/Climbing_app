@@ -40,7 +40,11 @@ import chromadb.config # Settingsをインポート
 import google.generativeai as genai # Gemini API をインポート
 from PIL import Image # PIL をインポート
 
-# --- デバッグ用 Secrets 表示 --- (ここに追加)
+# --- Streamlit ページ設定 (最初の Streamlit コマンドである必要あり) ---
+st.set_page_config(page_title="🧗 ボルダリング動画分析＆アドバイス (Gemini Vision)", layout="wide")
+# ---------------------------------------------------------------------
+
+# --- デバッグ用 Secrets 表示 --- (set_page_config の後に移動)
 st.sidebar.subheader("Secrets Keys (Debug)")
 if hasattr(st.secrets, 'items'): # .items() が使えるか確認
     for section, keys in st.secrets.items():
@@ -331,7 +335,6 @@ def check_chromadb_status():
         return f"❌ ChromaDB クライアント初期化失敗: {e}"
 
 # --- Streamlit アプリ本体 ---
-st.set_page_config(page_title="🧗 ボルダリング動画分析＆アドバイス (Gemini Vision)", layout="wide")
 st.title("🧗 ボルダリング動画分析＆アドバイス (Gemini Vision)")
 
 # --- セッション状態の初期化 --- (動画データ保持用 state 追加)

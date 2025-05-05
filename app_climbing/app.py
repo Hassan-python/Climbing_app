@@ -461,10 +461,12 @@ if uploaded_file is not None:
                 # --- ユーザー入力欄 ---
                 st.text_input(
                     "課題の種類 (例: スラブ、強傾斜)",
+                    value=st.session_state.problem_type,
                     key="problem_type"
                 )
                 st.text_area(
                     "難しいと感じるポイント (例: 〇〇へのデッド)",
+                    value=st.session_state.crux,
                     key="crux",
                     height=100
                 )

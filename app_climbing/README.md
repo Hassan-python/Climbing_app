@@ -54,9 +54,9 @@ SQLite の実装として `pysqlite3` を使用するように試みます（環
     ```
 
 3.  **依存関係のインストール:**
-    `requirements.txt` に `pysqlite3-binary` が含まれていることを確認してください（特に Streamlit Cloud など、システム標準の SQLite が古い場合に必要）。
+    `app_climbing/requirements.txt` に `pysqlite3-binary` が含まれていることを確認してください（特に Streamlit Cloud など、システム標準の SQLite が古い場合に必要）。
     ```bash
-    pip install -r requirements.txt
+    pip install -r app_climbing/requirements.txt
     ```
 
 4.  **シークレットファイルの設定:**
@@ -82,7 +82,7 @@ SQLite の実装として `pysqlite3` を使用するように試みます（環
 このアプリケーションは、事前にベクトル化され ChromaDB に格納されたボルダリングに関する知識を利用します。データはリモートの ChromaDB インスタンスに格納されている必要があります。
 
 *   **コレクション名:** `bouldering_advice` (アプリケーションコード内の `CHROMA_COLLECTION_NAME` 定数で定義)
-*   **データの準備とロード:** ChromaDB にデータをロードする方法については、別途ドキュメントやスクリプトを参照してください。（現状、このリポジトリにはデータロード用のスクリプトは含まれていません。以前の `load_knowledge.py` は削除されました。）
+*   **データの準備とロード:** `app_climbing/knowledge_base` ディレクトリに知識ソースとなるテキストファイルを配置し、`app_climbing/load_knowledge.py` スクリプトを実行して ChromaDB にロードします。詳細は `load_knowledge.py` のコードやコメントを参照してください。
 
 ## 実行
 

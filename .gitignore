@@ -40,4 +40,32 @@ app_simple_OCR/
 backup_app_get_stamp/
 backups/
 test/
-app_change_katakana/ 
+app_change_katakana/
+
+# Secrets file
+app_climbing/secrets.yaml
+
+# Environments
+.env
+*.env
+!.env.example
+
+# Python cache and compiled files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+.venv
+venv/
+ENV/
+env/
+
+# IDE / Editor specific files
+.idea/
+.vscode/
+*.swp
+
+# OS specific files
+.DS_Store
+Thumbs.db 

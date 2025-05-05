@@ -1,6 +1,7 @@
 import os
 # import shutil # ディレクトリ削除のためにインポート ← 不要
 import argparse
+import yaml # YAML読み込みのために追加
 from langchain_community.document_loaders import DirectoryLoader, TextLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAIEmbeddings
@@ -13,9 +14,52 @@ import sys
 import time
 
 # --- 定数 (app.pyと合わせる) ---
-KNOWLEDGE_BASE_DIR = "./knowledge_base"
+# スクリプト自身のディレクトリを取得
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+KNOWLEDGE_BASE_DIR = os.path.join(SCRIPT_DIR, "knowledge_base") # スクリプトからの相対パスに変更
+
 # CHROMA_DB_PATH = "./chroma_db" # ローカルパスは使わない
 CHROMA_COLLECTION_NAME = "bouldering_advice"
+SECRETS_FILE_PATH = os.path.join(SCRIPT_DIR, "secrets.yaml") # こちらもスクリプトからの相対パスに
+
+# --- YAMLファイルから設定を読み込み環境変数に設定する関数 ---
+def load_secrets_from_yaml(file_path=SECRETS_FILE_PATH):
+    """YAMLファイルから設定を読み込み、環境変数に設定する"""
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            secrets = yaml.safe_load(f)
+            if not secrets:
+                print(f"警告: {file_path} が空か、無効なYAML形式です。", file=sys.stderr)
+                return
+
+            # OpenAI APIキーを設定 (secrets['openai']['api_key'] が存在すれば)
+            openai_key = secrets.get('openai', {}).get('api_key')
+            if openai_key:
+                if "OPENAI_API_KEY" not in os.environ:
+                    os.environ["OPENAI_API_KEY"] = openai_key
+                    print(f"{file_path} から OpenAI APIキーを環境変数に設定しました。")
+                else:
+                    print(f"環境変数 OPENAI_API_KEY は既に設定されています。{file_path} の値は使用しません。")
+            else:
+                print(f"警告: {file_path} に OpenAI API キー ('openai.api_key') が見つかりません。", file=sys.stderr)
+
+            # ChromaDB URLを設定 (secrets['chromadb']['url'] が存在すれば)
+            chromadb_url = secrets.get('chromadb', {}).get('url')
+            if chromadb_url:
+                if "CHROMA_DB_URL" not in os.environ:
+                    os.environ["CHROMA_DB_URL"] = chromadb_url
+                    print(f"{file_path} から ChromaDB URL を環境変数に設定しました。")
+                else:
+                    print(f"環境変数 CHROMA_DB_URL は既に設定されています。{file_path} の値は使用しません。")
+            else:
+                 print(f"警告: {file_path} に ChromaDB URL ('chromadb.url') が見つかりません。", file=sys.stderr)
+
+    except FileNotFoundError:
+        print(f"警告: {file_path} が見つかりません。環境変数またはStreamlit Secretsを使用します。", file=sys.stderr)
+    except yaml.YAMLError as e:
+        print(f"エラー: {file_path} の読み込み中にYAMLエラーが発生しました: {e}", file=sys.stderr)
+    except Exception as e:
+        print(f"エラー: {file_path} の読み込み中に予期せぬエラーが発生しました: {e}", file=sys.stderr)
 
 # --- APIキー/URL取得関数 (環境変数優先、Streamlit Secretsフォールバック) ---
 def get_env_or_secret(key_name, secret_section, secret_key):
@@ -102,7 +146,7 @@ def load_and_store_knowledge_http(mode='replace'):
         ssl_enabled = parsed_url.scheme == 'https'
         settings = chromadb.config.Settings(
             chroma_api_impl="rest",
-            requests_timeout=120 # タイムアウト設定を追加
+            # requests_timeout=120 # このバージョンの chromadb ではサポートされていないため削除
         )
         client = chromadb.HttpClient(host=host, port=port, ssl=ssl_enabled, settings=settings)
         # 接続確認
@@ -181,6 +225,9 @@ def load_and_store_knowledge_http(mode='replace'):
         return False
 
 if __name__ == "__main__":
+    # --- YAMLファイルから設定を読み込む --- (スクリプト実行時にのみ)
+    load_secrets_from_yaml()
+
     parser = argparse.ArgumentParser(description="知識ベースを読み込み、リモートChromaDBに格納/追加します。")
     parser.add_argument(
         "-m", "--mode",

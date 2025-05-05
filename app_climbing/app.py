@@ -29,6 +29,7 @@ import chromadb
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 from langchain.schema import Document # Documentオブジェクト操作のため
+import chromadb.config # Settingsをインポート
 
 # --- 定数 --- (必要に応じて調整)
 ANALYSIS_INTERVAL_SEC = 0.5 # フレーム抽出間隔
@@ -120,8 +121,23 @@ def get_advice_from_frames(frames, openai_api_key, problem_type, crux):
         port = parsed_url.port if parsed_url.port else (443 if parsed_url.scheme == 'https' else 80)
         ssl_enabled = parsed_url.scheme == 'https'
 
-        # HttpClient を初期化
-        client = chromadb.HttpClient(host=host, port=port, ssl=ssl_enabled)
+        # HttpClient を初期化 (SettingsでAPI実装を指定)
+        settings = chromadb.config.Settings(
+            chroma_api_impl="rest",
+            # 必要に応じて他の設定も追加可能
+        )
+        client = chromadb.HttpClient(host=host, port=port, ssl=ssl_enabled, settings=settings)
+
+        # --- 追加: デフォルトテナントとデータベースの存在を確認/作成 ---
+        try:
+            tenant = client.get_or_create_tenant('default_tenant')
+            database = client.get_or_create_database('default_database', tenant='default_tenant')
+            st.info(f"Ensured tenant '{tenant.name}' and database '{database.name}' exist.")
+        except Exception as db_init_e:
+            st.error(f"Failed to ensure default tenant/database: {db_init_e}")
+            return None, []
+        # ---------------------------------------------------------
+
         # コレクションを取得または作成 (HttpClient経由)
         # vectorstore = client.get_or_create_collection(
         #     name=CHROMA_COLLECTION_NAME,
@@ -131,7 +147,9 @@ def get_advice_from_frames(frames, openai_api_key, problem_type, crux):
         vectorstore = Chroma(
             client=client, # persist_directory の代わりに client を指定
             collection_name=CHROMA_COLLECTION_NAME,
-            embedding_function=embeddings
+            embedding_function=embeddings,
+            # LangChainのChromaクラスはデフォルトで指定されたテナント/DBを使うはず
+            # 必要であれば tenant='default_tenant', database='default_database' を明示的に指定
         )
 
         base_retriever = vectorstore.as_retriever()

@@ -1,3 +1,16 @@
+import sys
+try:
+    __import__("pysqlite3")
+    sys.modules["sqlite3"] = sys.modules.pop("pysqlite3")
+    # Streamlitのログで確認できるように標準出力に追加
+    print("Successfully swapped sqlite3 with pysqlite3")
+except ImportError:
+    # Streamlitのログで確認できるように標準出力に追加
+    print("pysqlite3 not found, using system sqlite3.")
+    # pysqlite3が見つからない場合のエラーハンドリングをここに追加することも検討
+    pass
+
+# 必要なライブラリのインポート (chromadbを含む)
 import streamlit as st
 import os
 from urllib.parse import urlparse # これを追加

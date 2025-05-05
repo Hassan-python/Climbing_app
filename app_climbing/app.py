@@ -77,10 +77,12 @@ def get_openai_api_key():
 # --- Gemini APIキー (Secretsから読み込む想定) ---
 def get_gemini_api_key():
     """Streamlit SecretsからGemini APIキーを取得"""
-    # secrets.toml のキー名を "google_genai" に合わせる
-    api_key = st.secrets.get("google_genai", {}).get("api_key")
+    # secrets.toml のキー名を "google_genai" に合わせる -> "gemini" に修正
+    # api_key = st.secrets.get("google_genai", {}).get("api_key")
+    api_key = st.secrets.get("gemini", {}).get("api_key") # セクション名を "gemini" に修正
     if not api_key:
-        st.error("Gemini APIキー (google_genai.api_key) がsecrets.tomlに設定されていません。")
+        # st.error("Gemini APIキー (google_genai.api_key) がsecrets.tomlに設定されていません。")
+        st.error("Gemini APIキー (gemini.api_key) がsecrets.tomlに設定されていません。") # エラーメッセージも修正
     return api_key
 
 # --- ChromaDB URL (Secretsから読み込む想定) ---

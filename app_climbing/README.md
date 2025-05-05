@@ -1,81 +1,129 @@
-# 🧗 ボルダリング動画分析＆アドバイス アプリ
+# Climbing Analysis & Advice App
 
-このアプリケーションは、アップロードされたボルダリング動画の一部を分析し、AIが改善のためのアドバイスを提供する Streamlit Web アプリケーションです。
+## 概要
 
-## ✨ 主な機能
+このアプリケーションは、アップロードされたボルダリング動画（5秒以内）を分析し、改善のためのアドバイスを生成する Streamlit アプリケーションです。
 
-*   **動画アップロード:** MP4, MOV, AVI 形式の動画ファイルをアップロードできます。
-*   **分析範囲選択:** スライダーを使って、動画内の分析したい5秒間の開始位置を指定できます。
-*   **課題情報入力 (任意):** 分析の精度向上のため、課題の種類や難しいと感じるポイントを入力できます。
-*   **フレーム抽出・表示:** 指定された範囲から一定間隔でフレームを抽出し、画面に表示します（90度回転）。
-*   **AIによるアドバイス生成:** 抽出されたフレーム情報（現在はフレーム数のみ活用）とユーザーの入力に基づき、LangChain と OpenAI の LLM (GPT-4 Nano) を使用して RAG (Retrieval-Augmented Generation) パイプラインを実行し、アドバイスを生成します。
-*   **ChromaDB連携:** アドバイス生成の知識ベースとして、外部で動作する ChromaDB ベクトルデータベースに接続します。
-*   **デバッグモード:** アドバイス生成時に参照された知識ソース（ChromaDB から取得したドキュメント）を表示するデバッグモードがあります。
+動画からキーフレームを抽出し、Google Gemini Vision API を使用してフレーム画像を分析します。その分析結果と、事前にリモートの ChromaDB に格納されたボルダリングに関する知識ベースを組み合わせ、ユーザーが入力した「課題の種類」や「難しい点」も考慮して、OpenAI GPT モデルが具体的なアドバイスを生成します。
 
-## 🛠️ 技術スタック
+SQLite の実装として `pysqlite3` を使用するように試みます（環境にインストールされている場合）。
 
-*   **フロントエンド:** Streamlit (`streamlit==1.37.0`)
-*   **バックエンド/コアロジック:** Python
-*   **LLM/Embeddings:** OpenAI (GPT-4 Nano, OpenAI Embeddings via `langchain-openai`, `openai`, `tiktoken`)
-*   **AIオーケストレーション:** LangChain (`langchain`, `langchain-community`, `langchain-core`)
-*   **ベクトルデータベース:** ChromaDB (`chromadb==1.0.8`) - HTTP クライアント経由で接続。別途サーバーインスタンスの実行が必要。
-*   **動画処理:** MoviePy (`moviepy==1.0.3`), OpenCV (`opencv-python-headless`), Imageio (`imageio`, `imageio-ffmpeg`), NumPy (`numpy`)
-*   **データベース互換性:** `pysqlite3-binary==0.5.4` (Streamlit Cloud 環境などでの `sqlite3` バージョン問題を回避するため)
-*   **Webフレームワーク (依存関係):** FastAPI (`fastapi==0.115.9` - ChromaDB の依存関係)
-*   **デプロイ環境 (想定):** Streamlit Cloud
-*   **システム依存関係 (Streamlit Cloud):** `ffmpeg`, `build-essential` (`packages.txt` で指定)
+## 主な機能
 
-## 🚀 セットアップ & 実行
+*   **動画アップロード:** ユーザーはクライミング動画ファイル (mp4, mov, avi, 5秒以内) をアップロードできます。
+*   **動画プレビューと分析範囲指定:** アップロードされた動画をプレビューし、分析を開始したい時間を指定できます（デフォルトは動画開始から1秒間）。
+*   **キーフレーム抽出:** 指定された開始時間から一定期間（デフォルト1秒）の動画フレームを抽出します。
+*   **画像分析 (Gemini Vision):** 抽出された代表フレーム画像（最大10フレーム）を Google Gemini Vision API (`gemini-2.5-pro-preview-03-25`) に送信し、クライマーの動きに関する客観的な観察結果を取得します。タイムアウトは180秒に設定されています。
+*   **RAG (Retrieval-Augmented Generation):**
+    *   Gemini Vision による分析結果と、ユーザーが入力した課題情報（種類、難しい点）を組み合わせます。
+    *   リモートの ChromaDB に格納されたボルダリング知識ベースから関連情報を検索します。
+    *   Geminiの分析結果、検索された知識、ユーザー入力を統合し、最終的なアドバイス生成のためのプロンプトを作成します。
+*   **アドバイス生成 (OpenAI GPT):** 最終プロンプトを OpenAI API (デフォルト: `gpt-4.1-nano`、Secretsで変更可能) に送信し、ユーザーへの具体的で実践的なアドバイスを生成・表示します。タイムアウトは120秒に設定されています。自信のない表現を避けるようにプロンプトで指示しています。
+*   **デバッグ情報表示:** デバッグモードを有効にすると、Secrets のキー、ChromaDB の接続ステータス、Gemini の分析結果、参照した知識ソースを表示します。
+*   **エラーハンドリング:** APIキーの不足、動画ファイルの問題、API呼び出しエラーなどを検知し、ユーザーにエラーメッセージを表示します。
 
-### 前提条件
+## 技術スタック
 
-*   Python (3.9 以降推奨)
-*   Git
+*   **Webフレームワーク:** [Streamlit](https://streamlit.io/)
+*   **言語モデル:** [OpenAI GPT (e.g., gpt-4.1-nano)](https://openai.com/), [Google Gemini 2.5 Pro Preview](https://ai.google.dev/)
+*   **ベクトルデータベース:** [ChromaDB](https://www.trychroma.com/) (リモートサーバーへ HttpClient で接続)
+*   **LLM オーケストレーション:** [LangChain](https://www.langchain.com/)
+*   **動画処理:** [MoviePy](https://zulko.github.io/moviepy/), [OpenCV (`opencv-python-headless`)](https://opencv.org/)
+*   **データベース:** [SQLite](https://www.sqlite.org/index.html) (必要に応じて [pysqlite3-binary](https://github.com/coleifer/pysqlite3) を使用)
+*   **依存関係管理:** `requirements.txt`
+*   **設定管理:** Streamlit Secrets (`secrets.toml`)
+*   **その他:** NumPy, Pillow
 
-### 手順
+## セットアップ
 
 1.  **リポジトリをクローン:**
     ```bash
-    git clone https://github.com/Hassan-python/Climbing_app.git
-    cd Climbing_app/app_climbing
+    git clone <repository_url>
+    cd <repository_directory>
     ```
 
-2.  **Secrets の設定:**
-    プロジェクトルート (`app_climbing` ディレクトリ) に `.streamlit` ディレクトリを作成し、その中に `secrets.toml` ファイルを作成します。以下の内容を記述し、実際のキーと URL に置き換えてください。
+2.  **(推奨) 仮想環境の作成と有効化:**
+    ```bash
+    # Windows
+    python -m venv .venv
+    .venv\Scripts\activate
 
-    ```toml
-    # .streamlit/secrets.toml
-
-    [openai]
-    api_key = "sk-YOUR_OPENAI_API_KEY"
-
-    [chromadb]
-    url = "YOUR_CHROMA_DB_HTTP_URL" # 例: "https://your-chroma-service-xxxx.run.app"
+    # macOS/Linux
+    python3 -m venv .venv
+    source .venv/bin/activate
     ```
 
 3.  **依存関係のインストール:**
+    `requirements.txt` に `pysqlite3-binary` が含まれていることを確認してください（特に Streamlit Cloud など、システム標準の SQLite が古い場合に必要）。
     ```bash
     pip install -r requirements.txt
     ```
-    *(注意: `opencv-python-headless` など、環境によっては追加のシステムライブラリが必要になる場合があります)*
 
-4.  **アプリケーションの実行:**
-    ```bash
-    streamlit run app.py
-    ```
-    Web ブラウザで表示されたローカルアドレス (通常 `http://localhost:8501`) にアクセスします。
+4.  **シークレットファイルの設定:**
+    *   プロジェクトのルートディレクトリ（または`.streamlit`ディレクトリ内）に `secrets.toml` ファイルを作成します。
+    *   以下の内容を参考に、ご自身の API キーと ChromaDB URL を入力します:
+        ```toml
+        # secrets.toml
 
-### Streamlit Cloud へのデプロイ
+        [openai]
+        api_key = "YOUR_OPENAI_API_KEY_HERE"
+        # model_name = "gpt-4o-mini" # オプション: デフォルト以外を使用する場合
 
-1.  リポジトリを GitHub にプッシュします。
-2.  Streamlit Cloud ([https://share.streamlit.io/](https://share.streamlit.io/)) にアクセスし、"New app" からリポジトリ (`Hassan-python/Climbing_app`)、ブランチ (`main`)、メインファイル (`app_climbing/app.py`) を指定してデプロイします。
-3.  Streamlit Cloud のアプリケーション設定画面で、`secrets.toml` と同様の内容を Secrets として設定します。
-4.  `requirements.txt` と `packages.txt` が Streamlit Cloud によって自動的に読み込まれ、依存関係がインストールされます。
+        [gemini]
+        api_key = "YOUR_GOOGLE_GEMINI_API_KEY_HERE"
 
-## 📝 注意点
+        [chromadb]
+        url = "YOUR_CHROMA_DB_URL_HERE" # 例: "https://your-chroma-service-url.run.app"
+        ```
+    *   **注意:** この `secrets.toml` ファイルは `.gitignore` に登録されているため、Git リポジトリにはコミットされません。
 
-*   **ChromaDB サーバー:** このアプリケーションは、実行中の ChromaDB サーバーインスタンスが別途必要です。`secrets.toml` で指定された URL に、アクセス可能な ChromaDB サーバーが起動している必要があります (例: Google Cloud Run などでデプロイ)。
-*   **知識ベース:** アドバイスの質は ChromaDB に格納されている知識ベースの内容に大きく依存します。現状、知識ベースの構築・更新はこのアプリケーションの範囲外です。
-*   **API コスト:** OpenAI API の利用にはコストが発生します。
-*   **フレーム分析:** 現在、AI アドバイス生成には抽出されたフレームの「数」のみが情報として渡されています。将来的にはフレームの内容自体を分析に含めることで、より精度の高いアドバイスが期待できます。
-*   **SyntaxWarning:** `moviepy` に関する `SyntaxWarning` がログに出力されることがありますが、これは `moviepy` 内部の問題であり、通常はアプリケーションの動作に影響しません。
+## ナレッジベース (ChromaDB)
+
+このアプリケーションは、事前にベクトル化され ChromaDB に格納されたボルダリングに関する知識を利用します。データはリモートの ChromaDB インスタンスに格納されている必要があります。
+
+*   **コレクション名:** `bouldering_advice` (アプリケーションコード内の `CHROMA_COLLECTION_NAME` 定数で定義)
+*   **データの準備とロード:** ChromaDB にデータをロードする方法については、別途ドキュメントやスクリプトを参照してください。（現状、このリポジトリにはデータロード用のスクリプトは含まれていません。以前の `load_knowledge.py` は削除されました。）
+
+## 実行
+
+セットアップが完了したら、以下のコマンドで Streamlit アプリケーションを起動します:
+
+```bash
+streamlit run app_climbing/app.py
+```
+
+Web ブラウザで表示されるローカル URL (通常 `http://localhost:8501`) にアクセスします。
+
+## デプロイ (Streamlit Cloud)
+
+このアプリケーションは Streamlit Cloud にデプロイできます。
+
+1.  **必要なファイル:**
+    *   `requirements.txt`: Python の依存関係。`pysqlite3-binary` が含まれていることを確認してください。
+    *   `app_climbing/app.py`: Streamlit アプリケーション本体。
+    *   （必要であれば）`packages.txt`: OSレベルの依存関係（例: `build-essential`）。
+
+2.  **Streamlit Cloud でのリポジトリ接続:** GitHub リポジトリを Streamlit Cloud アプリに接続します。
+
+3.  **シークレットの設定:**
+    *   Streamlit Cloud のアプリケーション設定画面 ([Settings] > [Secrets]) で、`secrets.toml` と同じ形式でシークレットを入力します。
+        ```toml
+        [openai]
+        api_key = "YOUR_OPENAI_API_KEY_HERE"
+        # model_name = "gpt-4.1-nano" # オプション
+
+        [gemini]
+        api_key = "YOUR_GOOGLE_GEMINI_API_KEY_HERE"
+
+        [chromadb]
+        url = "YOUR_CHROMA_DB_URL_HERE"
+        ```
+    *   アプリケーションは、これらのキーを Streamlit Secrets (`st.secrets`) 経由で読み込みます。
+
+4.  **デプロイ:** 設定が完了したら、アプリケーションをデプロイします。
+
+## 注意点
+
+*   動画ファイルは一時的にサーバー（または実行環境）の `temp_videos` ディレクトリに保存されます。このディレクトリのクリーンアップは自動では行われません。
+*   Gemini API と OpenAI API の呼び出しにはタイムアウトが設定されていますが、ネットワーク状況やAPI側の負荷によっては時間がかかる場合があります。
+*   ChromaDB への接続情報は Secrets から取得されます。URL が正しいか、また ChromaDB サーバーが稼働しているか確認してください。 

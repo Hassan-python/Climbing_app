@@ -13,4 +13,5 @@ openai
 tiktoken
 fastapi==0.115.9
 pysqlite3-binary==0.5.4
+google-generativeai
 # snowflake-connector-python[pandas] # ChromaDBを使用するため不要 

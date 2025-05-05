@@ -409,8 +409,8 @@ if uploaded_file is not None:
                 help="動画のどの時点から分析を開始するかを指定します。",
             )
 
-            # 分析終了時間を計算 (開始時間+3秒 or 動画の最後)
-            end_time = min(start_time + 3.0, video_duration) # 3秒固定に戻す
+            # 分析終了時間を計算 (開始時間+1秒 or 動画の最後)
+            end_time = min(start_time + 1.0, video_duration) # 1秒固定に変更
             st.info(f"分析範囲: **{start_time:.1f} 秒 〜 {end_time:.1f} 秒**") # シンプルな表示に戻す
 
             # --- 分析実行ボタン ---
@@ -425,7 +425,8 @@ if uploaded_file is not None:
                 if not openai_api_key or not gemini_api_key:
                     st.error("OpenAI または Gemini の API キーが設定されていません。Secrets を確認してください。")
                 else:
-                    st.info(f"{start_time:.1f}秒から{end_time:.1f}秒までの3秒間分析を開始します...") # 3秒固定のメッセージに戻す
+                    # st.info(f"{start_time:.1f}秒から{end_time:.1f}秒までの3秒間分析を開始します...") # 3秒固定のメッセージに戻す
+                    st.info(f"{start_time:.1f}秒から{end_time:.1f}秒までの1秒間分析を開始します...") # 1秒固定のメッセージに変更
                     frames = []
                     with st.spinner('フレームを抽出中...'):
                         frames = extract_frames(temp_file_path, start_time, end_time) # 正しいend_timeを渡す

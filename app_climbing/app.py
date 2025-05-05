@@ -343,7 +343,7 @@ if uploaded_file is not None:
             # スライダーの表示範囲が有効かチェック (video_durationが0に近い場合)
             if max_slider_value > 0.0:
                 start_time = st.slider(
-                    "分析を開始する秒数を選択してください (5秒間分析)",
+                    "分析を開始する秒数を選択してください (3秒間分析)",
                     min_value=0.0,
                     max_value=max_slider_value,
                     # valueがmax_valueを超えないように調整
@@ -354,8 +354,8 @@ if uploaded_file is not None:
                 # スライダーの値をセッション状態に保存
                 st.session_state.start_time = start_time
 
-                # 分析終了時間を計算 (開始時間+5秒 or 動画の最後)
-                end_time = min(start_time + 5.0, video_duration)
+                # 分析終了時間を計算 (開始時間+3秒 or 動画の最後)
+                end_time = min(start_time + 3.0, video_duration)
 
                 st.info(f"分析範囲: **{start_time:.1f} 秒 〜 {end_time:.1f} 秒**")
 

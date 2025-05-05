@@ -469,26 +469,26 @@ if uploaded_file is not None:
                     height=100
                 )
 
-                # --- 分析開始時間の設定 ---
-                current_start_time = st.number_input(
-                    "分析開始時間 (秒)",
-                    min_value=0.0,
-                    max_value=video_duration, # 最大値は動画の長さ(5秒以下)
-                    value=st.session_state.start_time, # 初期値はstateから
-                    step=0.1,
-                    format="%.1f",
-                    help="動画のどの時点から分析を開始するかを指定します。",
-                    key="start_time_widget"
-                )
-                # 値が変わったら state を更新
-                if current_start_time != st.session_state.start_time:
-                    st.session_state.start_time = current_start_time
-                    # プレビューに即時反映させたい場合は rerun するが、一旦不要
-                    # st.rerun()
+                # --- 分析開始時間の設定 (一時的にコメントアウト) ---
+                # current_start_time = st.number_input(
+                #     "分析開始時間 (秒)",
+                #     min_value=0.0,
+                #     max_value=video_duration,
+                #     value=st.session_state.start_time, # 初期値はstateから
+                #     step=0.1,
+                #     format="%.1f",
+                #     help="動画のどの時点から分析を開始するかを指定します。",
+                #     key="start_time_widget"
+                # )
+                # # 値が変わったら state を更新
+                # if current_start_time != st.session_state.start_time:
+                #     st.session_state.start_time = current_start_time
+                #     # プレビューに即時反映させたい場合は rerun するが、一旦不要
+                #     # st.rerun()
 
-                # 分析終了時間を計算 (1秒固定)
+                # 分析終了時間を計算 (1秒固定) - start_time は state から取得
                 end_time = min(st.session_state.start_time + DEFAULT_ANALYSIS_DURATION, video_duration)
-                st.info(f"分析範囲: **{st.session_state.start_time:.1f} 秒 〜 {end_time:.1f} 秒**")
+                # st.info(f"分析範囲: **{st.session_state.start_time:.1f} 秒 〜 {end_time:.1f} 秒**") # 関連する情報表示もコメントアウト
 
                 # --- 分析実行ボタン ---
                 if st.button("分析を開始", type="primary", use_container_width=True):

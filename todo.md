@@ -12,9 +12,9 @@
   - データボリュームのマウント設定
 - [ ] 🟢 ChromaDBへのデータロード自動化スクリプト
   - 初期データの準備と投入プロセス
-- [ ] 🔴 app_climbing アプリケーションのドキュメント更新
+- [x] 🔴 app_climbing アプリケーションのドキュメント更新
   - README.md の更新 (進行中 -> 完了へ)
-- [ ] 🔴 app_climbing アプリケーションの現状を Git に反映
+- [x] 🔴 app_climbing アプリケーションの現状を Git に反映
   - README.md, app_climbing/app.py のコミットとプッシュ (進行中)
 
 ## バグ修正

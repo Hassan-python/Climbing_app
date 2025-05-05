@@ -38,7 +38,7 @@ from PIL import Image # PIL をインポート
 ANALYSIS_INTERVAL_SEC = 0.5 # フレーム抽出間隔
 TEMP_VIDEO_DIR = "temp_videos" # 一時動画保存フォルダ
 CHROMA_COLLECTION_NAME = "bouldering_advice" # Chromaコレクション名
-MAX_FRAMES_FOR_GEMINI = 3 # Geminiに渡す最大フレーム数
+MAX_FRAMES_FOR_GEMINI = 10 # Geminiに渡す最大フレーム数
 
 # --- OpenAI APIキー (Secretsから読み込む想定) ---
 def get_openai_api_key():
@@ -224,7 +224,7 @@ def get_advice_from_frames(frames, openai_api_key, gemini_api_key, problem_type,
 
             # 最終プロンプトテンプレート
             final_prompt_template = """
-            あなたは経験豊富なボルダリングコーチです。以下の情報を**すべて考慮**して、クライマーへの**具体的で実践的な改善アドバイス**を日本語で生成してください。
+            あなたは経験豊富なボルダリングコーチです。以下の情報を**すべて考慮**して、クライマーへの**次のトライで試せるような具体的で実践的な改善アドバイス**を日本語で生成してください。
             **重要：絶対に「詳細は不明ですが」「提供された情報だけでは」「もし～なら」といった、推測や情報不足、自信のなさを示す言葉を使わないでください。** コーチとして断定的に、自信を持ってアドバイスしてください。
 
             ---

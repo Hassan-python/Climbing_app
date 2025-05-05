@@ -157,7 +157,7 @@ def get_advice_from_frames(frames, openai_api_key, gemini_api_key):
     else:
         try:
             genai.configure(api_key=gemini_api_key)
-            gemini_vision_model = genai.GenerativeModel('gemini-1.5-flash-latest')
+            gemini_vision_model = genai.GenerativeModel('gemini-2.5-pro-preview-03-25')
 
             num_frames_to_select = min(len(frames), MAX_FRAMES_FOR_GEMINI)
             selected_frames_cv = []
@@ -258,7 +258,7 @@ def get_advice_from_frames(frames, openai_api_key, gemini_api_key):
         st.error("OpenAI APIキーが未設定のため、最終アドバイスを生成できません。")
     else:
         try:
-            openai_model_name = st.secrets.get("openai", {}).get("model_name", "gpt-4o-mini")
+            openai_model_name = st.secrets.get("openai", {}).get("model_name", "gpt-4.1-nano")
             llm = ChatOpenAI(openai_api_key=openai_api_key, model_name=openai_model_name, temperature=0.7)
 
             final_prompt_template = """

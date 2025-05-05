@@ -1,5 +1,5 @@
 streamlit
-chromadb==0.5.3
+chromadb==1.0.8
 streamlit-chromadb-connection==1.0.5
 moviepy==1.0.3
 imageio
@@ -13,5 +13,5 @@ langchain
 openai
 tiktoken
 fastapi==0.111.0
-pysqlite3-binary  # SQLite問題を解決
+pysqlite3-binary==0.5.7
 # snowflake-connector-python[pandas] # ChromaDBを使用するため不要 

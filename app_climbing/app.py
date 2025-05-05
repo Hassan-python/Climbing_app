@@ -508,8 +508,6 @@ else: # uploaded_file is None or video_bytes is None
         st.session_state.uploaded_file_name = None
         st.session_state.video_duration = None
         st.session_state.start_time = 0.0
-        st.session_state.problem_type = ""
-        st.session_state.crux = ""
         st.session_state.analysis_result = None
         st.session_state.analysis_sources = []
         # st.rerun() # 状態クリア時にリランが必要なら

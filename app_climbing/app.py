@@ -264,6 +264,48 @@ def get_advice_from_frames(frames, openai_api_key, gemini_api_key, problem_type,
     # アドバイスとソースドキュメントを返す
     return final_advice, source_docs
 
+# --- ChromaDB ステータス確認関数 (デバッグ用) ---
+def check_chromadb_status():
+    """ChromaDBへの接続と基本的な動作を確認する (デバッグ用)"""
+    chromadb_url = get_chromadb_url()
+    openai_api_key = get_openai_api_key() # Embeddingのために必要
+
+    if not chromadb_url or not openai_api_key:
+        return "⚠️ ChromaDB URL または OpenAI API キーが未設定です。"
+
+    try:
+        # URL解析とクライアント初期化
+        parsed_url = urlparse(chromadb_url)
+        host = parsed_url.hostname
+        port = parsed_url.port if parsed_url.port else (443 if parsed_url.scheme == 'https' else 80)
+        ssl_enabled = parsed_url.scheme == 'https'
+        settings = chromadb.config.Settings(chroma_api_impl="rest")
+        client = chromadb.HttpClient(host=host, port=port, ssl=ssl_enabled, settings=settings)
+
+        # 1. ハートビート確認
+        try:
+            heartbeat = client.heartbeat()
+            # st.sidebar.info(f"💓 ChromaDB Heartbeat: {heartbeat}") # デバッグ詳細
+        except Exception as hb_e:
+            return f"❌ ChromaDB サーバー接続失敗 (Heartbeat): {hb_e}"
+
+        # 2. コレクション接続とアイテム数確認
+        try:
+            embeddings = OpenAIEmbeddings(openai_api_key=openai_api_key)
+            vectorstore = Chroma(
+                client=client,
+                collection_name=CHROMA_COLLECTION_NAME,
+                embedding_function=embeddings
+            )
+            count = vectorstore._collection.count()
+            return f"✅ ChromaDB 接続成功 (`{CHROMA_COLLECTION_NAME}`: {count} アイテム)"
+        except Exception as coll_e:
+            # コレクションが存在しない場合などのエラー
+             return f"⚠️ ChromaDB コレクション接続/カウント失敗: {coll_e}"
+
+    except Exception as e:
+        return f"❌ ChromaDB クライアント初期化失敗: {e}"
+
 # --- Streamlit アプリ本体 ---
 st.set_page_config(page_title="🧗 ボルダリング動画分析＆アドバイス (Gemini Vision)", layout="wide") # タイトルとレイアウト設定
 st.title("🧗 ボルダリング動画分析＆アドバイス (Gemini Vision)")
@@ -284,7 +326,19 @@ if 'analysis_sources' not in st.session_state:
 
 # --- UI要素 ---
 st.sidebar.header("設定")
-st.session_state.debug_mode = st.sidebar.checkbox("デバッグモード (参照ソース/Gemini結果表示)", value=st.session_state.debug_mode)
+st.session_state.debug_mode = st.sidebar.checkbox("デバッグモード (詳細情報表示)", value=st.session_state.debug_mode)
+
+# --- デバッグモード時の ChromaDB ステータス表示 ---
+if st.session_state.debug_mode:
+    with st.sidebar:
+        with st.spinner("ChromaDB ステータス確認中..."):
+            chroma_status = check_chromadb_status()
+            if "✅" in chroma_status:
+                st.info(chroma_status)
+            else:
+                st.warning(chroma_status)
+    st.sidebar.divider()
+# ----------------------------------------------
 
 st.header("1. 動画をアップロード")
 uploaded_file = st.file_uploader("分析したいボルダリング動画（MP4, MOVなど）を選択してください", type=['mp4', 'mov', 'avi'])

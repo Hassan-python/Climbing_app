@@ -424,8 +424,13 @@ if uploaded_file is not None:
 
         video_duration = st.session_state.video_duration
 
-        # --- UI表示 (動画長が取得でき、一時ファイルパスが有効なら) ---
-        if video_duration > 0 and temp_file_path and os.path.exists(temp_file_path):
+        # --- 動画長のチェックとUI表示 ---
+        if video_duration > 5.0:
+            # 5秒を超えている場合のエラー表示
+            st.error(f"動画の長さ ({video_duration:.2f} 秒) が5秒を超えています。5秒以下の動画をアップロードしてください。")
+            # 必要に応じて関連 state をリセットする処理を追加しても良い
+        elif 0 < video_duration <= 5.0 and temp_file_path and os.path.exists(temp_file_path):
+            # 5秒以下の有効な動画の場合のUI表示 (既存のコードをここに移動・内包)
             col1, col2 = st.columns([2, 1])
 
             with col1:
@@ -452,7 +457,7 @@ if uploaded_file is not None:
                 current_start_time = st.number_input(
                     "分析開始時間 (秒)",
                     min_value=0.0,
-                    max_value=video_duration,
+                    max_value=video_duration, # 最大値は動画の長さ(5秒以下)
                     value=st.session_state.start_time, # 初期値はstateから
                     step=0.1,
                     format="%.1f",
@@ -500,8 +505,10 @@ if uploaded_file is not None:
                             st.session_state.analysis_sources = sources
                         else:
                             st.error("フレームの抽出に失敗しました。")
-        else:
-            st.warning("動画情報が正しく読み込めていないため、分析設定を表示できません。")
+        elif video_duration <= 0:
+             # 動画長が0以下の場合 (既存の警告)
+             st.warning("動画情報が正しく読み込めていないため、分析設定を表示できません。")
+        # else: # temp_file_path がない場合などは暗黙的に何も表示しない
 
 # --- 分析結果の表示 ---
 if st.session_state.analysis_result:

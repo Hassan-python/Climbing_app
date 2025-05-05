@@ -40,6 +40,20 @@ import chromadb.config # Settingsをインポート
 import google.generativeai as genai # Gemini API をインポート
 from PIL import Image # PIL をインポート
 
+# --- デバッグ用 Secrets 表示 --- (ここに追加)
+st.sidebar.subheader("Secrets Keys (Debug)")
+if hasattr(st.secrets, 'items'): # .items() が使えるか確認
+    for section, keys in st.secrets.items():
+        st.sidebar.write(f"Section: [{section}]")
+        if isinstance(keys, dict): # セクションの値が辞書であることを確認
+             st.sidebar.write(f"- Keys: {list(keys.keys())}")
+        else:
+             # セクション直下に値がある場合 (通常はないはずだが念のため)
+             st.sidebar.write(f"- Value type: {type(keys)}")
+else:
+    st.sidebar.warning("st.secrets object does not have .items()")
+st.sidebar.divider()
+# ----------------------------
 
 # --- 定数 --- (必要に応じて調整)
 ANALYSIS_INTERVAL_SEC = 0.5 # フレーム抽出間隔

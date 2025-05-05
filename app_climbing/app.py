@@ -180,7 +180,7 @@ def get_advice_from_frames(frames, openai_api_key, gemini_api_key, problem_type,
                 host = parsed_url.hostname
                 port = parsed_url.port if parsed_url.port else (443 if parsed_url.scheme == 'https' else 80)
                 ssl_enabled = parsed_url.scheme == 'https'
-                settings = chromadb.config.Settings(chroma_api_impl="rest", persist_directory=None) # persist_directory=None を明示
+                settings = chromadb.config.Settings(chroma_api_impl="rest") # persist_directory=None を削除
                 client = chromadb.HttpClient(host=host, port=port, ssl=ssl_enabled, settings=settings)
 
                 # 接続確認 (オプションだがデバッグに役立つ)

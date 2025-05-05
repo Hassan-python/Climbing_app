@@ -12,5 +12,6 @@ langchain-core
 langchain
 openai
 tiktoken
-fastapi==0.111.0  # streamlit-chromadb-connection==1.0.5 が要求するバージョン
+fastapi==0.111.0
+pysqlite3-binary  # SQLite問題を解決
 # snowflake-connector-python[pandas] # ChromaDBを使用するため不要 

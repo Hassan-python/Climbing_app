@@ -443,68 +443,72 @@ if uploaded_file is not None:
             with col1:
                 st.subheader("動画プレビュー")
                 st.video(temp_file_path)
+
             with col2:
                 st.subheader("2. 分析設定")
                 st.success(f"動画 '{st.session_state.uploaded_file_name}' ({video_duration:.2f} 秒) をロードしました。")
-                # --- ユーザー入力欄 ---
-                st.text_input(
-                    "課題の種類 (例: スラブ、強傾斜)",
-                    key="problem_type"
-                )
-                st.text_area(
-                    "難しいと感じるポイント (例: 〇〇へのデッド)",
-                    key="crux",
-                    height=100
-                )
-                # --- 分析開始時間の設定 (コメントアウト解除) ---
-                current_start_time = st.number_input(
-                    "分析開始時間 (秒)",
-                    min_value=0.0,
-                    max_value=video_duration,
-                    value=st.session_state.start_time, # 初期値はstateから
-                    step=0.1,
-                    format="%.1f",
-                    help="動画のどの時点から分析を開始するかを指定します。",
-                    key="start_time_widget"
-                )
-                # 値が変わったら state を更新
-                if current_start_time != st.session_state.start_time:
-                    st.session_state.start_time = current_start_time
-                    # st.rerun()
-                # 分析終了時間を計算 (1秒固定) - start_time は state から取得
-                end_time = min(st.session_state.start_time + DEFAULT_ANALYSIS_DURATION, video_duration)
-                st.info(f"分析範囲: **{st.session_state.start_time:.1f} 秒 〜 {end_time:.1f} 秒**") # 関連する情報表示もコメントアウト解除
-                # --- 分析実行ボタン ---
-                if st.button("分析を開始", type="primary", use_container_width=True):
-                    st.session_state.analysis_result = None
-                    st.session_state.analysis_sources = []
 
-                    openai_api_key = get_openai_api_key()
-                    gemini_api_key = get_gemini_api_key()
+                # --- 入力フォームを開始 ---
+                with st.form(key='analysis_form'):
+                    st.write("分析に必要な情報を入力してください:") # フォームの説明
 
-                    if not openai_api_key or not gemini_api_key:
-                        st.error("OpenAI または Gemini の API キーが設定されていません。Secrets を確認してください。")
-                    else:
-                        start_time_for_analysis = st.session_state.start_time
-                        end_time_for_analysis = min(start_time_for_analysis + DEFAULT_ANALYSIS_DURATION, video_duration)
+                    # --- ユーザー入力欄 (フォーム内) ---
+                    st.text_input(
+                        "課題の種類 (例: スラブ、強傾斜)",
+                        key="problem_type" # value は設定しない
+                    )
+                    st.text_area(
+                        "難しいと感じるポイント (例: 〇〇へのデッド)",
+                        key="crux", # value は設定しない
+                        height=100
+                    )
+                    # --- 分析開始時間の設定 (フォーム内) ---
+                    st.number_input(
+                        "分析開始時間 (秒)",
+                        min_value=0.0,
+                        max_value=video_duration,
+                        value=st.session_state.start_time, # 初期値のみ state から取得
+                        step=0.1,
+                        format="%.1f",
+                        help="動画のどの時点から分析を開始するかを指定します。",
+                        key="start_time_widget" # フォーム内ではウィジェットごとにkeyが必要
+                    )
 
-                        st.info(f"{start_time_for_analysis:.1f}秒から{end_time_for_analysis:.1f}秒までの{DEFAULT_ANALYSIS_DURATION}秒間分析を開始します...")
-                        frames = []
-                        with st.spinner('フレームを抽出中...'):
-                            frames = extract_frames(temp_file_path, start_time_for_analysis, end_time_for_analysis)
+                    # --- フォーム送信ボタン (分析実行トリガー) ---
+                    submitted = st.form_submit_button("分析を開始", type="primary", use_container_width=True)
 
-                        if frames:
-                            st.success(f"{len(frames)} フレームの抽出に成功しました。")
-                            advice, sources = get_advice_from_frames(
-                                frames,
-                                openai_api_key,
-                                gemini_api_key
-                                # problem_type と crux は関数内で state から取得
-                            )
-                            st.session_state.analysis_result = advice
-                            st.session_state.analysis_sources = sources
+                    if submitted:
+                        # ボタンが押されたら分析を実行
+                        st.session_state.analysis_result = None
+                        st.session_state.analysis_sources = []
+
+                        openai_api_key = get_openai_api_key()
+                        gemini_api_key = get_gemini_api_key()
+
+                        if not openai_api_key or not gemini_api_key:
+                            st.error("OpenAI または Gemini の API キーが設定されていません。Secrets を確認してください。")
                         else:
-                            st.error("フレームの抽出に失敗しました。")
+                            # フォーム送信時の値で分析時間を計算
+                            start_time_for_analysis = st.session_state.start_time_widget # フォームのキーから取得
+                            end_time_for_analysis = min(start_time_for_analysis + DEFAULT_ANALYSIS_DURATION, video_duration)
+
+                            st.info(f"分析範囲: {start_time_for_analysis:.1f} 秒 〜 {end_time_for_analysis:.1f} 秒") # ここで分析範囲を表示
+                            st.info(f"{start_time_for_analysis:.1f}秒から{end_time_for_analysis:.1f}秒までの{DEFAULT_ANALYSIS_DURATION}秒間分析を開始します...")
+                            frames = []
+                            with st.spinner('フレームを抽出中...'):
+                                frames = extract_frames(temp_file_path, start_time_for_analysis, end_time_for_analysis)
+
+                            if frames:
+                                st.success(f"{len(frames)} フレームの抽出に成功しました。")
+                                advice, sources = get_advice_from_frames(
+                                    frames,
+                                    openai_api_key,
+                                    gemini_api_key
+                                )
+                                st.session_state.analysis_result = advice
+                                st.session_state.analysis_sources = sources
+                            else:
+                                st.error("フレームの抽出に失敗しました。")
         elif video_duration <= 0:
              st.warning("動画情報が正しく読み込めていないか、長さが0秒です。")
     # else: (video_duration is None - エラー発生時) メッセージは上記 try-except で表示済

@@ -46,73 +46,89 @@ ANALYSIS_INTERVAL_SEC = 0.5 # フレーム抽出間隔
 TEMP_VIDEO_DIR = "temp_videos" # 一時動画保存フォルダ
 CHROMA_COLLECTION_NAME = "bouldering_advice" # Chromaコレクション名
 MAX_FRAMES_FOR_GEMINI = 10 # Geminiに渡す最大フレーム数
+DEFAULT_ANALYSIS_DURATION = 1.0 # デフォルトの分析時間（秒）
 
 # --- OpenAI APIキー (Secretsから読み込む想定) ---
 def get_openai_api_key():
     """Streamlit SecretsからOpenAI APIキーを取得"""
-    if "openai" not in st.secrets or "api_key" not in st.secrets["openai"]:
+    api_key = st.secrets.get("openai", {}).get("api_key")
+    if not api_key:
         st.error("OpenAI APIキーがsecrets.tomlに設定されていません。")
-        return None
-    return st.secrets["openai"]["api_key"]
+    return api_key
 
 # --- Gemini APIキー (Secretsから読み込む想定) ---
 def get_gemini_api_key():
     """Streamlit SecretsからGemini APIキーを取得"""
-    if "gemini" not in st.secrets or "api_key" not in st.secrets["gemini"]:
-        st.error("Gemini APIキーがsecrets.tomlに設定されていません。")
-        return None
-    return st.secrets["gemini"]["api_key"]
+    # secrets.toml のキー名を "google_genai" に合わせる
+    api_key = st.secrets.get("google_genai", {}).get("api_key")
+    if not api_key:
+        st.error("Gemini APIキー (google_genai.api_key) がsecrets.tomlに設定されていません。")
+    return api_key
 
 # --- ChromaDB URL (Secretsから読み込む想定) ---
 def get_chromadb_url():
     """Streamlit SecretsからChromaDB Cloud Run URLを取得"""
-    if "chromadb" not in st.secrets or "url" not in st.secrets["chromadb"]:
-        st.error("ChromaDBのURLがsecrets.tomlに設定されていません。")
-        return None
-    return st.secrets["chromadb"]["url"]
+    url = st.secrets.get("chromadb", {}).get("url")
+    if not url:
+        st.error("ChromaDBのURL (chromadb.url) がsecrets.tomlに設定されていません。")
+    return url
 
 # --- フレーム抽出関数 ---
 def extract_frames(video_path, start_sec, end_sec, interval_sec=ANALYSIS_INTERVAL_SEC):
     """指定された動画の区間からフレームを抽出する"""
-    cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        st.error(f"動画ファイルを開けませんでした: {video_path}")
-        return []
-
-    fps = cap.get(cv2.CAP_PROP_FPS) # フレームレートを取得
-    start_frame = int(start_sec * fps)
-    end_frame = int(end_sec * fps)
-    interval_frames = max(1, int(interval_sec * fps)) # 少なくとも1フレーム間隔
-
     frames = []
-    cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame) # 開始フレームに移動
+    cap = None # 初期化
+    try:
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            st.error(f"動画ファイルを開けませんでした: {video_path}")
+            return []
 
-    current_frame_count = start_frame
-    frame_read_count = 0
-    while cap.isOpened() and current_frame_count <= end_frame:
-        ret, frame = cap.read()
-        if not ret:
-            break
+        fps = cap.get(cv2.CAP_PROP_FPS) # フレームレートを取得
+        if fps is None or fps <= 0: # FPSが取得できない場合や0以下の場合
+            st.error(f"動画のFPSを取得できませんでした (値: {fps}): {video_path}")
+            return []
 
-        # interval_frames ごとにフレームを追加
-        if frame_read_count % interval_frames == 0:
-            if frame is not None: # フレームが有効かチェック
-                frames.append(frame)
-            else:
-                st.warning(f"フレーム {current_frame_count} の読み込み中に無効なデータが見つかりました。")
+        start_frame = int(start_sec * fps)
+        end_frame = int(end_sec * fps)
+        # end_frame が start_frame より小さくならないように保証
+        end_frame = max(start_frame, end_frame)
+        interval_frames = max(1, int(interval_sec * fps)) # 少なくとも1フレーム間隔
 
-        current_frame_count += 1
-        frame_read_count += 1
+        cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame) # 開始フレームに移動
 
-    cap.release()
+        current_frame_count = start_frame
+        frame_read_count = 0
+        while cap.isOpened() and current_frame_count <= end_frame:
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+            # interval_frames ごとにフレームを追加
+            if frame_read_count % interval_frames == 0:
+                if frame is not None: # フレームが有効かチェック
+                    frames.append(frame)
+                else:
+                    st.warning(f"フレーム {current_frame_count} の読み込み中に無効なデータが見つかりました。")
+
+            current_frame_count += 1
+            frame_read_count += 1
+
+    except Exception as e:
+        st.error(f"フレーム抽出中に予期せぬエラーが発生しました: {e}")
+        # エラーが発生した場合も空のリストを返す
+        frames = []
+    finally:
+        if cap is not None and cap.isOpened():
+            cap.release()
     return frames
 
 # --- RAG + Gemini Vision パイプライン関数 ---
-def get_advice_from_frames(frames, openai_api_key, gemini_api_key, problem_type, crux):
-    """抽出フレームをGeminiで分析し、その結果とChromaDB検索結果をGPT-4.1 Nanoに渡してアドバイス生成"""
+def get_advice_from_frames(frames, openai_api_key, gemini_api_key):
+    """抽出フレームをGeminiで分析し、その結果とChromaDB検索結果をGPTに渡してアドバイス生成"""
     st.info("Geminiによる画像分析とGPTによるアドバイス生成を開始します...")
 
-    # --- 1. Gemini Vision によるフレーム分析 ---
+    # --- 1. Gemini Vision によるフレーム分析 --- (インデントとロジック修正)
     gemini_analysis_text = "画像分析なし" # デフォルト値
     if not gemini_api_key:
         st.warning("Gemini APIキーが未設定のため、画像分析をスキップします。")
@@ -123,54 +139,59 @@ def get_advice_from_frames(frames, openai_api_key, gemini_api_key, problem_type,
             genai.configure(api_key=gemini_api_key)
             gemini_vision_model = genai.GenerativeModel('gemini-1.5-flash-latest')
 
-            # 分析するフレームを選択 (例: 最初、中間、最後の最大 MAX_FRAMES_FOR_GEMINI 枚)
             num_frames_to_select = min(len(frames), MAX_FRAMES_FOR_GEMINI)
-            indices = np.linspace(0, len(frames) - 1, num_frames_to_select, dtype=int)
-            selected_frames_cv = [frames[i] for i in indices]
+            selected_frames_cv = []
+            if num_frames_to_select > 0:
+                indices = np.linspace(0, len(frames) - 1, num_frames_to_select, dtype=int)
+                selected_frames_cv = [frames[i] for i in indices]
 
-            # OpenCVフレーム(BGR)をPIL Image(RGB)に変換
             selected_frames_pil = []
             for frame_cv in selected_frames_cv:
-                 if frame_cv is not None: # 再度Noneチェック
+                if frame_cv is not None:
                     frame_rgb = cv2.cvtColor(frame_cv, cv2.COLOR_BGR2RGB)
                     pil_image = Image.fromarray(frame_rgb)
                     selected_frames_pil.append(pil_image)
 
             if not selected_frames_pil:
-                 st.warning("Geminiに渡せる有効なフレームがありませんでした。")
+                st.warning("Geminiに渡せる有効なフレームがありませんでした。")
             else:
-                # Geminiへのプロンプト作成 (テキスト指示 + 画像リスト)
                 gemini_prompt_parts = [
-                    "あなたはクライミングの動きを分析する専門家です。提供された一連の画像（ボルダリング中のフレーム）を見て、以下の点を**具体的かつ簡潔に**日本語で記述してください。\n"
-                    "- クライマーの体勢やバランス\n"
-                    "- 各フレームでの手足の位置と動き\n"
-                    "- 見受けられる非効率な動きや、落下につながりそうな不安定な要素\n"
-                    "アドバイスではなく、客観的な観察結果のみを記述してください。\n\n",
+                    """あなたはクライミングの動きを分析する専門家です。提供された一連の画像（ボルダリング中のフレーム）を見て、以下の点を**具体的かつ簡潔に**日本語で記述してください。
+
+                    - クライマーの体勢やバランス
+                    - 各フレームでの手足の位置と動き
+                    - 見受けられる非効率な動きや、落下につながりそうな不安定な要素
+
+                    アドバイスではなく、客観的な観察結果のみを記述してください。
+                    """,
                 ]
-                gemini_prompt_parts.extend(selected_frames_pil) # 画像を追加
+                gemini_prompt_parts.extend(selected_frames_pil)
 
                 with st.spinner(f"Geminiが {len(selected_frames_pil)} フレームを分析中..."):
-                    # TODO: response = gemini_vision_model.generate_content(gemini_prompt_parts, request_options={"timeout": 120}) のようにタイムアウト設定を検討
-                    response = gemini_vision_model.generate_content(gemini_prompt_parts)
-                    # response.prompt_feedback をチェックしてブロックされたか確認するのも良い
-                    if response.parts:
-                        gemini_analysis_text = response.text
-                        st.success("Geminiによるフレーム分析が完了しました。")
-                    else:
-                        st.warning("Geminiからの応答が空でした。コンテンツフィルターにブロックされた可能性があります。")
-                        # prompt_feedback の内容をログやデバッグ表示する
-                        st.warning(f"Gemini Prompt Feedback: {response.prompt_feedback}")
+                    try:
+                        response = gemini_vision_model.generate_content(
+                            gemini_prompt_parts,
+                            request_options={"timeout": 180}
+                        )
+                        if response.prompt_feedback.block_reason != 0:
+                            st.warning(f"Geminiへのリクエストがブロックされました: {response.prompt_feedback.block_reason}")
+                            st.warning(f"Safety Ratings: {response.prompt_feedback.safety_ratings}")
+                        elif response.parts:
+                            gemini_analysis_text = response.text
+                            st.success("Geminiによるフレーム分析が完了しました。")
+                        else:
+                            st.warning("Geminiからの応答が空でした。")
+                    except Exception as genai_e:
+                        st.error(f"Gemini API 呼び出し中にエラーが発生しました: {genai_e}")
 
-
-                    if st.session_state.debug_mode:
-                        with st.expander("Gemini 分析結果 (デバッグ用)", expanded=False):
-                            st.text(gemini_analysis_text)
+                if st.session_state.debug_mode and gemini_analysis_text != "画像分析なし":
+                    with st.expander("Gemini 分析結果 (デバッグ用)", expanded=False):
+                        st.text(gemini_analysis_text)
 
         except Exception as e:
-            st.error(f"Geminiでのフレーム分析中にエラーが発生しました: {e}")
-            # エラーが発生しても処理を続行する
+            st.error(f"Geminiでのフレーム分析準備中にエラーが発生しました: {e}")
 
-    # --- 2. ChromaDBからの知識検索 ---
+    # --- 2. ChromaDBからの知識検索 --- (インデントとロジック修正)
     retrieved_docs_content = "関連知識なし"
     source_docs = []
     if not openai_api_key:
@@ -180,23 +201,14 @@ def get_advice_from_frames(frames, openai_api_key, gemini_api_key, problem_type,
             embeddings = OpenAIEmbeddings(openai_api_key=openai_api_key)
             chromadb_url = get_chromadb_url()
             if not chromadb_url:
-                 st.warning("ChromaDB URLが未設定のため、知識ベースの検索をスキップします。")
+                st.warning("ChromaDB URLが未設定のため、知識ベースの検索をスキップします。")
             else:
-                # st.info(f"Connecting to ChromaDB at {chromadb_url}") # 接続先URL確認用
                 parsed_url = urlparse(chromadb_url)
                 host = parsed_url.hostname
                 port = parsed_url.port if parsed_url.port else (443 if parsed_url.scheme == 'https' else 80)
                 ssl_enabled = parsed_url.scheme == 'https'
-                settings = chromadb.config.Settings(chroma_api_impl="rest") # persist_directory=None を削除
+                settings = chromadb.config.Settings(chroma_api_impl="rest")
                 client = chromadb.HttpClient(host=host, port=port, ssl=ssl_enabled, settings=settings)
-
-                # 接続確認 (オプションだがデバッグに役立つ)
-                # try:
-                #     client.heartbeat() # サーバーへの疎通確認
-                #     st.info("ChromaDB server heartbeat successful.")
-                # except Exception as hb_e:
-                #     st.error(f"ChromaDB server heartbeat failed: {hb_e}")
-                #     raise # 接続失敗時はここでエラーにする
 
                 vectorstore = Chroma(
                     client=client,
@@ -204,32 +216,31 @@ def get_advice_from_frames(frames, openai_api_key, gemini_api_key, problem_type,
                     embedding_function=embeddings
                 )
 
-                # 検索クエリを作成 (ユーザー入力 + Gemini分析結果の最初の部分)
-                search_query = f"課題の種類: {problem_type if problem_type else '指定なし'}, 難しい点: {crux if crux else '指定なし'}"
+                search_query = f"課題の種類: {st.session_state.problem_type if st.session_state.problem_type else '指定なし'}, 難しい点: {st.session_state.crux if st.session_state.crux else '指定なし'}"
                 if gemini_analysis_text != "画像分析なし" and gemini_analysis_text:
-                    search_query += f"\n画像分析結果の抜粋: {gemini_analysis_text[:300]}" # Gemini結果もクエリに含める (長すぎると検索精度が落ちる可能性)
+                    search_query += f"\n画像分析結果の抜粋: {gemini_analysis_text[:300]}"
 
                 with st.spinner("関連知識を検索中..."):
-                    source_docs = vectorstore.similarity_search(search_query, k=3) # k=3を指定
+                    source_docs = vectorstore.similarity_search(search_query, k=3)
                     if source_docs:
-                        retrieved_docs_content = "\n\n".join([doc.page_content for doc in source_docs]) # 正しい結合方法
+                        # 文字列結合の修正
+                        retrieved_docs_content = "\n\n".join([doc.page_content for doc in source_docs])
                         st.success(f"{len(source_docs)} 件の関連知識を検索しました。")
                     else:
-                         st.warning("関連する知識が見つかりませんでした。")
+                        st.warning("関連する知識が見つかりませんでした。")
 
         except Exception as e:
             st.error(f"ChromaDBでの知識検索中にエラーが発生しました: {e}")
 
-
-    # --- 3. GPT-4.1 Nano による最終アドバイス生成 ---
+    # --- 3. GPT による最終アドバイス生成 --- (インデントとロジック修正)
     final_advice = "アドバイスを生成できませんでした。"
     if not openai_api_key:
         st.error("OpenAI APIキーが未設定のため、最終アドバイスを生成できません。")
     else:
         try:
-            llm = ChatOpenAI(openai_api_key=openai_api_key, model_name="gpt-4.1-nano-2025-04-14", temperature=0.7) # モデル名は仮
+            openai_model_name = st.secrets.get("openai", {}).get("model_name", "gpt-4o-mini")
+            llm = ChatOpenAI(openai_api_key=openai_api_key, model_name=openai_model_name, temperature=0.7)
 
-            # 最終プロンプトテンプレート
             final_prompt_template = """
             あなたは経験豊富なボルダリングコーチです。以下の情報を**すべて考慮**して、クライマーへの**次のトライで試せるような具体的で実践的な改善アドバイス**を日本語で生成してください。
             **重要：絶対に「詳細は不明ですが」「提供された情報だけでは」「もし～なら」といった、推測や情報不足、自信のなさを示す言葉を使わないでください。** コーチとして断定的に、自信を持ってアドバイスしてください。
@@ -253,35 +264,31 @@ def get_advice_from_frames(frames, openai_api_key, gemini_api_key, problem_type,
                 input_variables=["user_problem_type", "user_crux", "gemini_analysis", "retrieved_knowledge"]
             )
 
-            # プロンプトに情報を埋め込む
             formatted_prompt = PROMPT.format(
-                user_problem_type=problem_type if problem_type else "特に指定なし",
-                user_crux=crux if crux else "特に指定なし",
-                gemini_analysis=gemini_analysis_text, # デフォルト値 "画像分析なし" が入る場合もある
+                user_problem_type=st.session_state.problem_type if st.session_state.problem_type else "特に指定なし",
+                user_crux=st.session_state.crux if st.session_state.crux else "特に指定なし",
+                gemini_analysis=gemini_analysis_text,
                 retrieved_knowledge=retrieved_docs_content
             )
 
-            with st.spinner("GPTが最終アドバイスを生成中..."):
-                # TODO: timeout の設定を検討
-                final_advice = llm.invoke(formatted_prompt).content
+            with st.spinner(f"GPT ({openai_model_name}) が最終アドバイスを生成中..."):
+                final_advice = llm.invoke(formatted_prompt, config={"max_retries": 1, "request_timeout": 120}).content
 
         except Exception as e:
             st.error(f"最終アドバイスの生成中にエラーが発生しました: {e}")
 
-    # アドバイスとソースドキュメントを返す
-    return final_advice, source_docs
+    return final_advice, source_docs # 関数から抜ける return 文を正しいインデントに戻す
 
-# --- ChromaDB ステータス確認関数 (デバッグ用) ---
+# --- ChromaDB ステータス確認関数 (デバッグ用) --- (インデント修正)
 def check_chromadb_status():
     """ChromaDBへの接続と基本的な動作を確認する (デバッグ用)"""
     chromadb_url = get_chromadb_url()
-    openai_api_key = get_openai_api_key() # Embeddingのために必要
+    openai_api_key = get_openai_api_key()
 
     if not chromadb_url or not openai_api_key:
         return "⚠️ ChromaDB URL または OpenAI API キーが未設定です。"
 
     try:
-        # URL解析とクライアント初期化
         parsed_url = urlparse(chromadb_url)
         host = parsed_url.hostname
         port = parsed_url.port if parsed_url.port else (443 if parsed_url.scheme == 'https' else 80)
@@ -289,14 +296,11 @@ def check_chromadb_status():
         settings = chromadb.config.Settings(chroma_api_impl="rest")
         client = chromadb.HttpClient(host=host, port=port, ssl=ssl_enabled, settings=settings)
 
-        # 1. ハートビート確認
         try:
-            heartbeat = client.heartbeat()
-            # st.sidebar.info(f"💓 ChromaDB Heartbeat: {heartbeat}") # デバッグ詳細
+            client.heartbeat()
         except Exception as hb_e:
             return f"❌ ChromaDB サーバー接続失敗 (Heartbeat): {hb_e}"
 
-        # 2. コレクション接続とアイテム数確認
         try:
             embeddings = OpenAIEmbeddings(openai_api_key=openai_api_key)
             vectorstore = Chroma(
@@ -307,19 +311,24 @@ def check_chromadb_status():
             count = vectorstore._collection.count()
             return f"✅ ChromaDB 接続成功 (`{CHROMA_COLLECTION_NAME}`: {count} アイテム)"
         except Exception as coll_e:
-            # コレクションが存在しない場合などのエラー
              return f"⚠️ ChromaDB コレクション接続/カウント失敗: {coll_e}"
 
     except Exception as e:
         return f"❌ ChromaDB クライアント初期化失敗: {e}"
 
 # --- Streamlit アプリ本体 ---
-st.set_page_config(page_title="🧗 ボルダリング動画分析＆アドバイス (Gemini Vision)", layout="wide") # タイトルとレイアウト設定
+st.set_page_config(page_title="🧗 ボルダリング動画分析＆アドバイス (Gemini Vision)", layout="wide")
 st.title("🧗 ボルダリング動画分析＆アドバイス (Gemini Vision)")
 
-# --- セッション状態の初期化 --- (変更なし)
+# --- セッション状態の初期化 --- (動画データ保持用 state 追加)
 if 'debug_mode' not in st.session_state:
     st.session_state.debug_mode = False
+if 'video_bytes' not in st.session_state:
+    st.session_state.video_bytes = None
+if 'uploaded_file_name' not in st.session_state:
+    st.session_state.uploaded_file_name = None
+if 'video_duration' not in st.session_state:
+    st.session_state.video_duration = None
 if 'start_time' not in st.session_state:
     st.session_state.start_time = 0.0
 if 'problem_type' not in st.session_state:
@@ -345,137 +354,168 @@ if st.session_state.debug_mode:
             else:
                 st.warning(chroma_status)
     st.sidebar.divider()
-# ----------------------------------------------
 
 st.header("1. 動画をアップロード")
 uploaded_file = st.file_uploader("分析したいボルダリング動画（MP4, MOVなど）を選択してください", type=['mp4', 'mov', 'avi'])
 
-
+# --- ファイルアップロード後の処理 --- (session state を使うように変更)
 if uploaded_file is not None:
-    # 一時フォルダを作成 (存在しない場合)
-    if not os.path.exists(TEMP_VIDEO_DIR):
+    # 以前のファイルと違うファイルがアップロードされたら状態をリセット
+    if uploaded_file.name != st.session_state.get('uploaded_file_name'): # getで安全にアクセス
+        st.session_state.video_bytes = uploaded_file.getvalue()
+        st.session_state.uploaded_file_name = uploaded_file.name
+        st.session_state.video_duration = None
+        st.session_state.start_time = 0.0
+        st.session_state.analysis_result = None
+        st.session_state.analysis_sources = []
+        st.session_state.problem_type = "" # リセット
+        st.session_state.crux = "" # リセット
+        # st.success(f"新しい動画 '{uploaded_file.name}' を認識しました。") # メッセージは任意
+
+    # --- 一時ファイルの準備 (バイトデータが存在する場合) ---
+    temp_file_path = None
+    if st.session_state.video_bytes:
+        if not os.path.exists(TEMP_VIDEO_DIR):
+            try:
+                os.makedirs(TEMP_VIDEO_DIR)
+            except OSError as e:
+                st.error(f"一時ディレクトリの作成に失敗しました: {e}")
+                st.stop()
+
+        temp_file_path = os.path.join(TEMP_VIDEO_DIR, st.session_state.uploaded_file_name)
         try:
-            os.makedirs(TEMP_VIDEO_DIR)
-        except OSError as e:
-            st.error(f"一時ディレクトリの作成に失敗しました: {e}")
-            st.stop() # ディレクトリが作れない場合は続行不可
-
-    # アップロードされたファイルを一時フォルダに保存
-    temp_file_path = os.path.join(TEMP_VIDEO_DIR, uploaded_file.name)
-    try:
-        with open(temp_file_path, "wb") as f:
-            f.write(uploaded_file.getbuffer())
-    except Exception as e:
-        st.error(f"一時ファイルへの書き込みに失敗しました: {e}")
-        st.stop()
-
-
-    # st.success(f"動画 '{uploaded_file.name}' をアップロードしました。") # ボタン押下後に移動
-
-    # 動画の長さを取得
-    try:
-        # 存在確認を追加
-        if not os.path.exists(temp_file_path):
-            st.error("一時動画ファイルが見つかりません。")
+            with open(temp_file_path, "wb") as f:
+                f.write(st.session_state.video_bytes)
+        except Exception as e:
+            st.error(f"一時ファイルへの書き込みに失敗しました: {e}")
             st.stop()
 
-        with VideoFileClip(temp_file_path) as clip: # with を使って自動クローズ
-            video_duration = clip.duration
-        # st.info(f"動画の長さ: {video_duration:.2f} 秒") # ボタン押下後に移動
-    except Exception as e:
-        st.error(f"動画情報の取得に失敗しました: {e}")
-        video_duration = None # エラー時はdurationをNoneに
-
-    if video_duration is not None:
-        col1, col2 = st.columns([2, 1]) # レイアウト調整
-
-        with col1:
-            st.subheader("動画プレビュー")
-             # 動画を表示 (スライダーと連動)
-            st.video(temp_file_path, start_time=int(st.session_state.start_time))
-
-        with col2:
-            st.subheader("2. 分析設定")
-            st.success(f"動画 '{uploaded_file.name}' ({video_duration:.2f} 秒) をロードしました。")
-
-            # --- 分析開始時間の設定 ---
-            start_time = st.number_input(
-                "分析開始時間 (秒)",
-                min_value=0.0,
-                max_value=video_duration,
-                value=0.0, # 初期値を0.0に戻す
-                step=0.1,   # 増減ステップ
-                format="%.1f", # 小数点第一位まで表示
-                help="動画のどの時点から分析を開始するかを指定します。",
-            )
-
-            # 分析終了時間を計算 (開始時間+1秒 or 動画の最後)
-            end_time = min(start_time + 1.0, video_duration) # 1秒固定に変更
-            st.info(f"分析範囲: **{start_time:.1f} 秒 〜 {end_time:.1f} 秒**") # シンプルな表示に戻す
-
-            # --- 分析実行ボタン ---
-            if st.button("分析を開始", type="primary", use_container_width=True):
-                st.session_state.analysis_result = None # 結果をリセット
-                st.session_state.analysis_sources = [] # ソースをリセット
-
-                # APIキーのチェック
-                openai_api_key = get_openai_api_key()
-                gemini_api_key = get_gemini_api_key()
-
-                if not openai_api_key or not gemini_api_key:
-                    st.error("OpenAI または Gemini の API キーが設定されていません。Secrets を確認してください。")
+        # --- 動画長の取得 (初回のみ) ---
+        if st.session_state.video_duration is None:
+            try:
+                if os.path.exists(temp_file_path):
+                    with VideoFileClip(temp_file_path) as clip:
+                        st.session_state.video_duration = clip.duration
                 else:
-                    # st.info(f"{start_time:.1f}秒から{end_time:.1f}秒までの3秒間分析を開始します...") # 3秒固定のメッセージに戻す
-                    st.info(f"{start_time:.1f}秒から{end_time:.1f}秒までの1秒間分析を開始します...") # 1秒固定のメッセージに変更
-                    frames = []
-                    with st.spinner('フレームを抽出中...'):
-                        frames = extract_frames(temp_file_path, start_time, end_time) # 正しいend_timeを渡す
+                     st.error("一時動画ファイルが見つかりません。(Duration取得時)")
+                     st.session_state.video_duration = 0
+            except Exception as e:
+                st.error(f"動画情報の取得に失敗しました: {e}")
+                st.session_state.video_duration = 0
 
-                    if frames:
-                        st.success(f"{len(frames)} フレームの抽出に成功しました。")
-                        # フレーム表示はデバッグモード時のみ、または削除
-                        # if st.session_state.debug_mode:
-                        #     st.subheader("抽出されたフレーム (デバッグ用)")
-                        #     # ... (フレーム表示ループ) ...
+        video_duration = st.session_state.video_duration
 
-                        # --- 分析の実行 (Gemini + GPT) ---
-                        advice, sources = get_advice_from_frames(
-                            frames,
-                            openai_api_key,
-                            gemini_api_key,
-                            st.session_state.problem_type, # セッションステートから取得
-                            st.session_state.crux        # セッションステートから取得
-                        )
-                        st.session_state.analysis_result = advice
-                        st.session_state.analysis_sources = sources
+        # --- UI表示 (動画長が取得でき、一時ファイルパスが有効なら) ---
+        if video_duration > 0 and temp_file_path and os.path.exists(temp_file_path):
+            col1, col2 = st.columns([2, 1])
+
+            with col1:
+                st.subheader("動画プレビュー")
+                # st.video の start_time 引数は削除 (シークバー操作の邪魔になるため)
+                st.video(temp_file_path)
+
+            with col2:
+                st.subheader("2. 分析設定")
+                st.success(f"動画 '{st.session_state.uploaded_file_name}' ({video_duration:.2f} 秒) をロードしました。")
+
+                # --- ユーザー入力欄 ---
+                st.text_input(
+                    "課題の種類 (例: スラブ、強傾斜)",
+                    key="problem_type"
+                )
+                st.text_area(
+                    "難しいと感じるポイント (例: 〇〇へのデッド)",
+                    key="crux",
+                    height=100
+                )
+
+                # --- 分析開始時間の設定 ---
+                current_start_time = st.number_input(
+                    "分析開始時間 (秒)",
+                    min_value=0.0,
+                    max_value=video_duration,
+                    value=st.session_state.start_time, # 初期値はstateから
+                    step=0.1,
+                    format="%.1f",
+                    help="動画のどの時点から分析を開始するかを指定します。",
+                    key="start_time_widget"
+                )
+                # 値が変わったら state を更新
+                if current_start_time != st.session_state.start_time:
+                    st.session_state.start_time = current_start_time
+                    # プレビューに即時反映させたい場合は rerun するが、一旦不要
+                    # st.rerun()
+
+                # 分析終了時間を計算 (1秒固定)
+                end_time = min(st.session_state.start_time + DEFAULT_ANALYSIS_DURATION, video_duration)
+                st.info(f"分析範囲: **{st.session_state.start_time:.1f} 秒 〜 {end_time:.1f} 秒**")
+
+                # --- 分析実行ボタン ---
+                if st.button("分析を開始", type="primary", use_container_width=True):
+                    st.session_state.analysis_result = None
+                    st.session_state.analysis_sources = []
+
+                    openai_api_key = get_openai_api_key()
+                    gemini_api_key = get_gemini_api_key()
+
+                    if not openai_api_key or not gemini_api_key:
+                        st.error("OpenAI または Gemini の API キーが設定されていません。Secrets を確認してください。")
                     else:
-                        st.error("フレームの抽出に失敗しました。")
-    else:
-        # 動画長がほぼ0の場合
-        st.warning("動画が短すぎるため、分析範囲を選択できません。")
-        # start_timeをリセットしておく
+                        start_time_for_analysis = st.session_state.start_time
+                        end_time_for_analysis = min(start_time_for_analysis + DEFAULT_ANALYSIS_DURATION, video_duration)
+
+                        st.info(f"{start_time_for_analysis:.1f}秒から{end_time_for_analysis:.1f}秒までの{DEFAULT_ANALYSIS_DURATION}秒間分析を開始します...")
+                        frames = []
+                        with st.spinner('フレームを抽出中...'):
+                            frames = extract_frames(temp_file_path, start_time_for_analysis, end_time_for_analysis)
+
+                        if frames:
+                            st.success(f"{len(frames)} フレームの抽出に成功しました。")
+                            advice, sources = get_advice_from_frames(
+                                frames,
+                                openai_api_key,
+                                gemini_api_key
+                                # problem_type と crux は関数内で state から取得
+                            )
+                            st.session_state.analysis_result = advice
+                            st.session_state.analysis_sources = sources
+                        else:
+                            st.error("フレームの抽出に失敗しました。")
+        else:
+            st.warning("動画情報が正しく読み込めていないため、分析設定を表示できません。")
+
+# --- 分析結果の表示 ---
+if st.session_state.analysis_result:
+    st.divider()
+    st.subheader("💡 AIからのアドバイス")
+    st.markdown(st.session_state.analysis_result)
+
+    if st.session_state.debug_mode and st.session_state.analysis_sources:
+        st.subheader("📚 参照した知識ソース (デバッグ用)")
+        for i, doc in enumerate(st.session_state.analysis_sources):
+            source_name = "不明"
+            if doc.metadata and 'source' in doc.metadata:
+                try:
+                    source_name = os.path.basename(doc.metadata.get('source', '不明'))
+                except Exception:
+                    source_name = str(doc.metadata.get('source', '不明'))
+            with st.expander(f"ソース {i+1}: `{source_name}`"):
+                st.text(doc.page_content)
+
+else: # uploaded_file is None or video_bytes is None
+    if st.session_state.get('uploaded_file_name') is not None:
+        st.session_state.video_bytes = None
+        st.session_state.uploaded_file_name = None
+        st.session_state.video_duration = None
         st.session_state.start_time = 0.0
+        st.session_state.problem_type = ""
+        st.session_state.crux = ""
+        st.session_state.analysis_result = None
+        st.session_state.analysis_sources = []
+        # st.rerun() # 状態クリア時にリランが必要なら
 
-    # --- 分析結果の表示 ---
-    if st.session_state.analysis_result:
-        st.divider()
-        st.subheader("💡 AIからのアドバイス")
-        st.markdown(st.session_state.analysis_result) # markdownとして表示
-
-        # --- 参照ソースの表示 (デバッグモード時のみ) ---
-        if st.session_state.debug_mode and st.session_state.analysis_sources:
-            st.subheader("📚 参照した知識ソース (デバッグ用)")
-            # 各ソースドキュメントを展開表示
-            for i, doc in enumerate(st.session_state.analysis_sources):
-                source_name = os.path.basename(doc.metadata.get('source', '不明なソース')) if doc.metadata else '不明なソース'
-                with st.expander(f"ソース {i+1}: `{source_name}`"):
-                    st.text(doc.page_content)
-                    # メタデータ全体も表示（デバッグ用）
-                    # st.json(doc.metadata)
-
-else:
     st.info("動画ファイルをアップロードしてください。")
 
-# --- 一時ファイルのクリーンアップ (オプション) ---
-# Streamlit Cloud では自動でクリーンアップされることが多いが、ローカル実行用に考慮
-# アプリ終了時などに TEMP_VIDEO_DIR 内を削除する処理を追加することも可能 
+# --- 一時ファイルのクリーンアップ検討 ---
+# Streamlit のセッション管理の仕組み上、明示的なクリーンアップは難しい場合がある
+# 一時ファイルが残り続ける場合、定期的な手動削除やサーバー側での仕組みが必要になる可能性 

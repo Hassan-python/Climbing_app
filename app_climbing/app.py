@@ -544,7 +544,9 @@ if st.session_state.analysis_result:
             with st.expander(f"ソース {i+1}: `{source_name}`"):
                 st.text(doc.page_content)
 
-else: # uploaded_file is None or video_bytes is None
+# --- ファイルがアップロードされていない場合の処理 --- (elseブロック修正)
+else: # uploaded_file is None or video_bytes is None (← この条件ではなく uploaded_file is None で判定すべき)
+    # 以前のファイル情報が残っていればリセット
     if st.session_state.get('uploaded_file_name') is not None:
         st.session_state.video_bytes = None
         st.session_state.uploaded_file_name = None
@@ -552,8 +554,10 @@ else: # uploaded_file is None or video_bytes is None
         st.session_state.start_time = 0.0
         st.session_state.analysis_result = None
         st.session_state.analysis_sources = []
-        # st.rerun() # 状態クリア時にリランが必要なら
+        # problem_type と crux はウィジェットに紐づいているため、ここではリセットしない
+        # 必要なら st.rerun() を呼ぶ
 
+    # ファイルがアップロードされていない場合にメッセージ表示
     st.info("動画ファイルをアップロードしてください。")
 
 # --- 一時ファイルのクリーンアップ検討 ---

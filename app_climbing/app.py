@@ -338,8 +338,7 @@ if uploaded_file is not None:
                                         st.image(
                                             rotated_frame, 
                                             caption=f"フレーム {global_index + 1} (回転後)", 
-                                            channels="BGR", 
-                                            use_container_width=True
+                                            channels="BGR" 
                                         )
                                     except Exception as e:
                                         # 回転や表示で予期せぬエラーが起きた場合

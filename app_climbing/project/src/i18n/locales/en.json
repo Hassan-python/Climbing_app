@@ -1,0 +1,76 @@
+{
+  "header": {
+    "title": "Bouldering Video Analysis & Advice (Gemini Vision)"
+  },
+  "uploader": {
+    "title": "Upload Video",
+    "description": "Video files like MP4, MOV (under 6 seconds)",
+    "processing": "Processing video...",
+    "compressing": "Compressing video...",
+    "complete": "Processing complete!",
+    "error": {
+      "title": "Error",
+      "videoOnly": "Only video files can be uploaded.",
+      "duration": "Videos must be under 6 seconds.",
+      "generic": "An error occurred while loading the video."
+    }
+  },
+  "analysis": {
+    "title": "Analysis Settings",
+    "noVideo": "Please upload a video",
+    "duration": "Video duration: {{duration}} seconds",
+    "problemType": {
+      "label": "Problem Type (e.g., Slab, Overhang)",
+      "placeholder": "Enter problem type"
+    },
+    "crux": {
+      "label": "Difficult Points (e.g., Deadpoint to specific hold)",
+      "description": "Detailed descriptions help generate more specific advice. Try to include hold characteristics, body positions, and movements.",
+      "placeholder": "Example: The transition from the right-hand pinch to the left-hand sloper is difficult. My body swings left, making the next hold unreachable."
+    },
+    "startTime": {
+      "label": "Analysis Start Time (seconds)",
+      "seconds": "s"
+    },
+    "button": {
+      "start": "Start Analysis",
+      "analyzing": "Analyzing..."
+    }
+  },
+  "result": {
+    "title": "AI Advice",
+    "loading": "Loading analysis results...",
+    "complete": "Analysis complete!"
+  },
+  "settings": {
+    "title": "Settings",
+    "debugMode": "Debug Mode",
+    "apiKeys": {
+      "title": "API Keys",
+      "gemini": "Gemini API Key"
+    }
+  },
+  "debug": {
+    "progress": {
+      "title": "Processing Status",
+      "videoUpload": "Video upload complete",
+      "frameExtraction": "Frame extraction complete",
+      "geminiAnalysis": "Gemini analysis complete",
+      "adviceGeneration": "Advice generation complete"
+    },
+    "retrievedKnowledge": {
+      "title": "Retrieved Knowledge (Debug)"
+    },
+    "geminiAnalysis": {
+      "title": "Gemini Analysis (Debug)"
+    },
+    "sources": {
+      "title": "Referenced Knowledge Sources (Debug)",
+      "source": "Source"
+    }
+  },
+  "errors": {
+    "uploadVideo": "No video selected",
+    "unexpectedError": "An unexpected error occurred during analysis"
+  }
+}

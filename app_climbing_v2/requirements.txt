@@ -1,0 +1,11 @@
+fastapi==0.110.0
+uvicorn==0.27.1
+python-multipart==0.0.9
+moviepy==1.0.3
+opencv-python-headless==4.9.0.80
+chromadb==0.4.22
+google-generativeai==0.3.2
+python-dotenv==1.0.1
+langchain==0.1.9
+langchain-openai==0.0.8
+Pillow==10.2.0

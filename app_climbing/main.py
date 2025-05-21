@@ -1,0 +1,350 @@
+from fastapi import FastAPI, UploadFile, HTTPException, Header
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel
+import os
+import uuid
+from typing import Optional, List, Dict, Any, Tuple
+from moviepy.editor import VideoFileClip
+import cv2
+import numpy as np
+from dotenv import load_dotenv
+import google.generativeai as genai
+import chromadb
+from chromadb.config import Settings
+from PIL import Image
+from google.cloud import storage
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from langchain_community.vectorstores import Chroma
+
+# Load environment variables
+load_dotenv()
+
+app = FastAPI()
+
+# Configure CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # In production, replace with specific origins
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Constants
+GCS_BUCKET_NAME = os.getenv("GCS_BUCKET_NAME")
+ANALYSIS_INTERVAL_SEC = 0.5
+MAX_FRAMES_FOR_GEMINI = 10
+CHROMA_COLLECTION_NAME = "bouldering_advice"
+
+class AnalysisSettings(BaseModel):
+    problemType: str
+    crux: str
+    startTime: float
+    gcsBlobName: str
+
+class Source(BaseModel):
+    name: str
+    content: str
+
+class AnalysisResponse(BaseModel):
+    advice: str
+    sources: list[Source]
+    geminiAnalysis: Optional[str] = None
+
+def extract_frames(video_path: str, start_sec: float, end_sec: float, interval_sec: float = ANALYSIS_INTERVAL_SEC) -> list:
+    frames = []
+    cap = cv2.VideoCapture(video_path)
+    
+    if not cap.isOpened():
+        raise HTTPException(status_code=400, detail="Could not open video file")
+        
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    start_frame = int(start_sec * fps)
+    end_frame = int(end_sec * fps)
+    interval_frames = max(1, int(interval_sec * fps))
+    
+    cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+    
+    current_frame = start_frame
+    while current_frame <= end_frame:
+        ret, frame = cap.read()
+        if not ret:
+            break
+            
+        if (current_frame - start_frame) % interval_frames == 0:
+            frames.append(frame)
+            
+        current_frame += 1
+        
+    cap.release()
+    return frames
+
+def get_chroma_client():
+    chromadb_url = os.getenv("CHROMA_DB_URL")
+    if not chromadb_url:
+        raise HTTPException(status_code=500, detail="ChromaDB URL not configured")
+        
+    try:
+        settings = Settings(chroma_api_impl="rest")
+        client = chromadb.HttpClient(host=chromadb_url, settings=settings)
+        return client
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"ChromaDB connection failed: {str(e)}")
+
+def get_langchain_chroma_vectorstore() -> Chroma:
+    """Langchain経由でChromaベクターストアを取得する"""
+    try:
+        gemini_embeddings = GoogleGenerativeAIEmbeddings(
+            model="models/embedding-001",
+            google_api_key=os.getenv("GEMINI_API_KEY")
+        )
+        
+        chroma_client = get_chroma_client() 
+        
+        vectorstore = Chroma(
+            client=chroma_client,
+            collection_name=CHROMA_COLLECTION_NAME,
+            embedding_function=gemini_embeddings
+        )
+        return vectorstore
+    except Exception as e:
+        print(f"Error creating Langchain Chroma vectorstore: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to initialize vectorstore: {str(e)}")
+
+def retrieve_from_chroma_langchain(query: str, k: int = 3) -> List[dict]:
+    """Langchainラッパーを使用してChromaDBから関連ドキュメントを取得する"""
+    try:
+        vectorstore = get_langchain_chroma_vectorstore()
+        source_docs = vectorstore.similarity_search(query, k=k)
+        
+        documents = []
+        for i, doc in enumerate(source_docs):
+            # メタデータからドキュメント名を取得しようと試みる。なければインデックスを使用。
+            doc_name = doc.metadata.get("name", str(i + 1)) if doc.metadata else str(i + 1)
+            documents.append({
+                "name": doc_name,
+                "content": doc.page_content
+            })
+        print(f"[DEBUG Langchain Chroma] Retrieved {len(documents)} documents for query: {query}")
+        return documents
+    except Exception as e:
+        print(f"Langchain Chroma retrieval error: {e}")
+        return []
+
+def analyze_and_generate_advice(
+    frames: list, 
+    problem_type: str, 
+    crux: str, 
+    output_language: str
+) -> Tuple[str, str, List[Source]]:
+    """1回のGemini呼び出しで動画分析とアドバイス生成を行う"""
+    if not frames:
+        return "No frames available for analysis", "アドバイスを生成できません", []
+        
+    try:
+        genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+        model = genai.GenerativeModel('gemini-2.0-flash-lite')
+        
+        # Select frames for analysis
+        num_frames = min(len(frames), MAX_FRAMES_FOR_GEMINI)
+        indices = np.linspace(0, len(frames) - 1, num_frames, dtype=int)
+        selected_frames = [frames[i] for i in indices]
+        
+        # Convert frames to PIL images
+        pil_images = []
+        for frame in selected_frames:
+            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            pil_image = Image.fromarray(rgb_frame)
+            pil_images.append(pil_image)
+            
+        # ChromaDBから関連情報を検索 (ユーザーのテキスト入力のみを使用)
+        rag_query = f"課題の種類: {problem_type}, 難しい点: {crux}"
+        retrieved_docs_for_gemini = retrieve_from_chroma_langchain(rag_query)
+        retrieved_knowledge = "\n\n".join([doc["content"] for doc in retrieved_docs_for_gemini])
+            
+        prompt = f"""
+        あなたはクライミングの動きを分析する専門家であり、経験豊富なプロのボルダリングコーチです。
+        提供された一連の画像（ボルダリング中のフレーム）を分析し、適切なアドバイスを提供してください。
+
+        ### タスク1: 画像分析
+        提供された画像を見て、以下の点を具体的かつ簡潔に記述してください：
+        - クライマーの体勢やバランス
+        - 各フレームでの手足の位置と動き
+        - 見受けられる非効率な動きや、落下につながりそうな不安定な要素
+
+        ### タスク2: アドバイス生成
+        画像分析結果と以下の情報を踏まえて、クライマーへの具体的で実践的な改善アドバイスを生成してください。
+
+        ### 回答生成時ルール (output rules) ###
+        - 回答は{output_language}で生成してください。
+        - 検索結果（関連するボルダリング知識）の内容を参考にしてアドバイスを提供してください。
+        - 検索結果に関連する情報がない場合でも、画像分析結果とユーザーの状況から最適なアドバイスを提供してください。
+        - 回答は「画像分析」と「アドバイス」の2つのセクションに分けて出力してください。
+        
+        ---
+        ユーザーが報告した状況:
+        - 課題の種類: {problem_type or "特に指定なし"}
+        - 難しいと感じるポイント: {crux or "特に指定なし"}
+        ---
+        関連するボルダリング知識 (データベースより):
+        {retrieved_knowledge}
+        ---
+        
+        回答形式:
+        
+        # 画像分析
+        [ここに画像の客観的な分析結果を記述]
+        
+        # アドバイス
+        [ここにコーチとしてのアドバイスを3ステップ程度で記述]
+        """
+        
+        response = model.generate_content([prompt, *pil_images])
+        full_response = response.text
+        
+        # レスポンスを分析とアドバイスに分割
+        try:
+            analysis_part = ""
+            advice_part = ""
+            
+            if "# 画像分析" in full_response and "# アドバイス" in full_response:
+                parts = full_response.split("# アドバイス")
+                analysis_part = parts[0].replace("# 画像分析", "").strip()
+                advice_part = parts[1].strip()
+            else:
+                # セクションが明確に分かれていない場合
+                analysis_part = "分析結果を抽出できませんでした"
+                advice_part = full_response
+            
+            return analysis_part, advice_part, [Source(name=doc["name"], content=doc["content"]) for doc in retrieved_docs_for_gemini]
+        except Exception as e:
+            print(f"Response parsing error: {e}")
+            # エラー時は分析結果、アドバイス、空のソースリストを返す
+            if "\n\n" in full_response:
+                 analysis_part, advice_part = full_response.split("\n\n", 1) # 最初の区切りで分割
+            else:
+                 analysis_part = full_response
+                 advice_part = "アドバイスの抽出に失敗しました"
+            return analysis_part, advice_part, []
+        
+    except Exception as e:
+        print(f"Gemini analysis and advice generation error: {e}")
+        return "画像分析中にエラーが発生しました", "アドバイス生成中にエラーが発生しました", []
+
+@app.post("/upload")
+async def upload_video(video: UploadFile):
+    if not video.filename:
+        raise HTTPException(status_code=400, detail="No video file provided")
+    if not GCS_BUCKET_NAME:
+        raise HTTPException(status_code=500, detail="GCS_BUCKET_NAME not configured")
+
+    # Generate unique filename for GCS
+    video_id = str(uuid.uuid4())
+    file_extension = os.path.splitext(video.filename)[1]
+    gcs_blob_name = f"videos/{video_id}{file_extension}"
+
+    try:
+        storage_client = storage.Client()
+        bucket = storage_client.bucket(GCS_BUCKET_NAME)
+        blob = bucket.blob(gcs_blob_name)
+
+        # Save uploaded file to GCS
+        content = await video.read()
+        blob.upload_from_string(content, content_type=video.content_type)
+
+        # Verify it's a valid video and check duration
+        temp_local_path = f"/tmp/{video_id}{file_extension}"
+        blob.download_to_filename(temp_local_path)
+
+        with VideoFileClip(temp_local_path) as clip:
+            if clip.duration > 5.0:
+                os.remove(temp_local_path)
+                blob.delete()
+                raise HTTPException(status_code=400, detail="Video must be 5 seconds or shorter")
+        
+        os.remove(temp_local_path)
+
+        return {"gcsBlobName": gcs_blob_name, "videoId": video_id}
+
+    except Exception as e:
+        if 'blob' in locals() and blob.exists():
+            try:
+                blob.delete()
+            except Exception as delete_e:
+                print(f"Error deleting blob during cleanup: {delete_e}")
+
+        if 'temp_local_path' in locals() and os.path.exists(temp_local_path):
+            os.remove(temp_local_path)
+            
+        print(f"Upload error: {e}") 
+        raise HTTPException(status_code=500, detail=f"Failed to upload video: {str(e)}")
+
+@app.post("/analyze", response_model=AnalysisResponse)
+async def analyze_video(settings: AnalysisSettings, x_language: Optional[str] = Header(None, alias="X-Language")):
+    if not settings.gcsBlobName:
+        raise HTTPException(status_code=400, detail="gcsBlobName must be provided in settings")
+    if not GCS_BUCKET_NAME:
+        raise HTTPException(status_code=500, detail="GCS_BUCKET_NAME not configured")
+
+    temp_local_path = f"/tmp/{os.path.basename(settings.gcsBlobName)}" 
+
+    try:
+        storage_client = storage.Client()
+        bucket = storage_client.bucket(GCS_BUCKET_NAME)
+        blob = bucket.blob(settings.gcsBlobName)
+
+        if not blob.exists():
+            raise HTTPException(status_code=404, detail=f"Video blob {settings.gcsBlobName} not found in GCS")
+
+        blob.download_to_filename(temp_local_path)
+
+        with VideoFileClip(temp_local_path) as clip:
+            end_time = min(settings.startTime + 1.0, clip.duration)
+
+        frames = extract_frames(temp_local_path, settings.startTime, end_time)
+        
+        # 言語設定の取得
+        output_language = "英語" # Default to English
+        if x_language and x_language.lower().startswith("ja"):
+            output_language = "日本語"
+        elif x_language and x_language.lower().startswith("en"):
+            output_language = "英語"
+        
+        # 1回のGemini呼び出しで分析とアドバイス生成、RAG結果取得を行う
+        gemini_analysis, final_advice, retrieved_sources = analyze_and_generate_advice(
+            frames,
+            settings.problemType,
+            settings.crux,
+            output_language
+        )
+                
+        if os.path.exists(temp_local_path):
+            os.remove(temp_local_path)
+            
+        return AnalysisResponse(
+            advice=final_advice,
+            sources=retrieved_sources,
+            geminiAnalysis=gemini_analysis
+        )
+        
+    except Exception as e:
+        if os.path.exists(temp_local_path):
+            os.remove(temp_local_path)
+        print(f"Analysis error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to analyze video: {str(e)}")
+
+@app.get("/chroma-status")
+async def check_chroma_status():
+    try:
+        vectorstore = get_langchain_chroma_vectorstore()
+        dummy_search = vectorstore.similarity_search("test", k=1)
+        count = vectorstore._collection.count()
+        
+        return {"status": f"✅ ChromaDB(Langchain) 接続成功 (`{CHROMA_COLLECTION_NAME}`: {count} アイテム)"}
+    except Exception as e:
+        return {"status": f"❌ ChromaDB(Langchain) connection failed: {str(e)}"}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

@@ -4,7 +4,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import os
 import uuid
-from typing import Optional
+from typing import Optional, List, Dict, Any
 from moviepy.editor import VideoFileClip
 import cv2
 import numpy as np
@@ -17,6 +17,9 @@ import chromadb
 from chromadb.config import Settings
 from PIL import Image
 from google.cloud import storage
+import asyncio
+from functools import lru_cache
+import time
 
 # Load environment variables
 load_dotenv()
@@ -122,6 +125,7 @@ def analyze_with_gemini(frames: list) -> str:
         print(f"Gemini analysis error: {e}")
         return "画像分析中にエラーが発生しました"
 
+@lru_cache(maxsize=1)
 def get_chroma_client():
     chromadb_url = os.getenv("CHROMA_DB_URL")
     if not chromadb_url:
@@ -133,6 +137,18 @@ def get_chroma_client():
         return client
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"ChromaDB connection failed: {str(e)}")
+
+@lru_cache(maxsize=32)
+def get_embeddings():
+    return OpenAIEmbeddings(openai_api_key=os.getenv("OPENAI_API_KEY"))
+
+@lru_cache(maxsize=1)
+def get_llm():
+    return ChatOpenAI(
+        openai_api_key=os.getenv("OPENAI_API_KEY"),
+        model_name=os.getenv("OPENAI_MODEL_NAME", "gpt-4.1-nano"),
+        temperature=0.5
+    )
 
 @app.post("/upload")
 async def upload_video(video: UploadFile):
@@ -183,6 +199,68 @@ async def upload_video(video: UploadFile):
         print(f"Upload error: {e}") 
         raise HTTPException(status_code=500, detail=f"Failed to upload video: {str(e)}")
 
+async def run_gemini_analysis(frames):
+    return analyze_with_gemini(frames)
+
+async def run_vector_search(settings, gemini_analysis):
+    embeddings = get_embeddings()
+    vectorstore = Chroma(
+        client=get_chroma_client(),
+        collection_name=CHROMA_COLLECTION_NAME,
+        embedding_function=embeddings
+    )
+    
+    search_query = f"課題の種類: {settings.problemType}, 難しい点: {settings.crux}\n画像分析結果: {gemini_analysis[:300]}"
+    return vectorstore.similarity_search(search_query, k=3)
+
+async def generate_advice(settings, gemini_analysis, source_docs, x_language):
+    llm = get_llm()
+    
+    # Determine the language for the response based on x_language header
+    output_language = "英語" # Default to English
+    if x_language and x_language.lower().startswith("ja"):
+        output_language = "日本語"
+    elif x_language and x_language.lower().startswith("en"):
+        output_language = "英語"
+    
+    prompt_template = f"""
+    あなたは経験豊富なプロのボルダリングコーチです。以下の情報をすべて考慮して、クライマーへの次のトライで試せるような具体的で実践的な改善アドバイスを生成してください。
+
+    ### 回答生成時ルール (output rules) ###
+    - 回答は{output_language}で生成してください。
+    
+    
+    ---
+    ユーザーが報告した状況:
+    - 課題の種類: {{user_problem_type}}
+    - 難しいと感じるポイント: {{user_crux}}
+    ---
+    AIによる画像分析結果 (客観的な観察):
+    {{gemini_analysis}}
+    ---
+    関連するボルダリング知識 (データベースより):
+    {{retrieved_knowledge}}
+    ---
+    
+    上記情報を踏まえた、コーチとしてのアドバイス (回答生成時間短縮のため，3ステップを推奨):
+    """
+    
+    PROMPT = PromptTemplate(
+        template=prompt_template,
+        input_variables=["user_problem_type", "user_crux", "gemini_analysis", "retrieved_knowledge"]
+    )
+    
+    retrieved_docs_content = "\n\n".join([doc.page_content for doc in source_docs])
+    
+    formatted_prompt = PROMPT.format(
+        user_problem_type=settings.problemType or "特に指定なし",
+        user_crux=settings.crux or "特に指定なし",
+        gemini_analysis=gemini_analysis,
+        retrieved_knowledge=retrieved_docs_content
+    )
+    
+    return llm.invoke(formatted_prompt).content
+
 @app.post("/analyze", response_model=AnalysisResponse)
 async def analyze_video(settings: AnalysisSettings, x_language: Optional[str] = Header(None, alias="X-Language")):
     if not settings.gcsBlobName:
@@ -193,6 +271,9 @@ async def analyze_video(settings: AnalysisSettings, x_language: Optional[str] = 
     temp_local_path = f"/tmp/{os.path.basename(settings.gcsBlobName)}" 
 
     try:
+        # 処理開始時間を記録
+        start_time = time.time()
+        
         storage_client = storage.Client()
         bucket = storage_client.bucket(GCS_BUCKET_NAME)
         blob = bucket.blob(settings.gcsBlobName)
@@ -207,72 +288,24 @@ async def analyze_video(settings: AnalysisSettings, x_language: Optional[str] = 
 
         frames = extract_frames(temp_local_path, settings.startTime, end_time)
         
-        gemini_analysis = analyze_with_gemini(frames)
+        # 並列処理で各タスクを実行
+        gemini_analysis_task = asyncio.create_task(run_gemini_analysis(frames))
         
-        embeddings = OpenAIEmbeddings(openai_api_key=os.getenv("OPENAI_API_KEY"))
-        vectorstore = Chroma(
-            client=get_chroma_client(),
-            collection_name=CHROMA_COLLECTION_NAME,
-            embedding_function=embeddings
-        )
+        # Gemini分析結果を待ってから、ベクトル検索を実行
+        gemini_analysis = await gemini_analysis_task
         
-        search_query = f"課題の種類: {settings.problemType}, 難しい点: {settings.crux}\n画像分析結果: {gemini_analysis[:300]}"
-        source_docs = vectorstore.similarity_search(search_query, k=3)
+        # ベクトル検索を実行
+        source_docs = await run_vector_search(settings, gemini_analysis)
         
-        llm = ChatOpenAI(
-            openai_api_key=os.getenv("OPENAI_API_KEY"),
-            model_name=os.getenv("OPENAI_MODEL_NAME", "gpt-4.1-nano"),
-            temperature=0.5
-        )
-        
-        # Determine the language for the response based on x_language header
-        output_language = "英語" # Default to English
-        if x_language and x_language.lower().startswith("ja"):
-            output_language = "日本語"
-        elif x_language and x_language.lower().startswith("en"):
-            output_language = "英語"
-        # Add more language conditions here if needed
-
-        prompt_template = f"""
-        あなたは経験豊富なプロのボルダリングコーチです。以下の情報をすべて考慮して、クライマーへの次のトライで試せるような具体的で実践的な改善アドバイスを生成してください。
-
-        ### 回答生成時ルール (output rules) ###
-        - 回答は{output_language}で生成してください。
-        
-        
-        ---
-        ユーザーが報告した状況:
-        - 課題の種類: {{user_problem_type}}
-        - 難しいと感じるポイント: {{user_crux}}
-        ---
-        AIによる画像分析結果 (客観的な観察):
-        {{gemini_analysis}}
-        ---
-        関連するボルダリング知識 (データベースより):
-        {{retrieved_knowledge}}
-        ---
-        
-        上記情報を踏まえた、コーチとしてのアドバイス (回答生成時間短縮のため，3ステップを推奨):
-        """
-        
-        PROMPT = PromptTemplate(
-            template=prompt_template,
-            input_variables=["user_problem_type", "user_crux", "gemini_analysis", "retrieved_knowledge"]
-        )
-        
-        retrieved_docs_content = "\n\n".join([doc.page_content for doc in source_docs])
-        
-        formatted_prompt = PROMPT.format(
-            user_problem_type=settings.problemType or "特に指定なし",
-            user_crux=settings.crux or "特に指定なし",
-            gemini_analysis=gemini_analysis,
-            retrieved_knowledge=retrieved_docs_content
-        )
-        
-        final_advice = llm.invoke(formatted_prompt).content
+        # アドバイス生成
+        final_advice = await generate_advice(settings, gemini_analysis, source_docs, x_language)
         
         if os.path.exists(temp_local_path):
             os.remove(temp_local_path)
+            
+        # 処理時間を記録
+        process_time = time.time() - start_time
+        print(f"Total analysis process time: {process_time:.2f} seconds")
             
         return AnalysisResponse(
             advice=final_advice,

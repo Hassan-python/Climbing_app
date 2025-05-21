@@ -21,6 +21,16 @@
 - [ ] 🟡 `requirements.txt` の整理
   - ルートにあった不要なファイルを削除 (実施済み)
   - `app_climbing/requirements.txt` の内容精査
+- [ ] 🟡 [バックエンド移行] Google Cloud Runへのデプロイ
+  - [ ] Dockerfileの確認・修正 (システム依存関係、uvicorn起動コマンド)
+  - [ ] GCPプロジェクト設定 (API有効化、Artifact Registry設定)
+  - [ ] 既存ChromaDBへの接続設定 (CHROMADB_URL環境変数の設定)
+  - [ ] 動画アップロード/分析処理をGoogle Cloud Storage利用に修正
+    - [ ] main.py の /upload, /analyze エンドポイント修正
+  - [ ] コンテナイメージのビルドとArtifact Registryへのプッシュ
+  - [ ] Cloud Runサービスへのデプロイと環境変数設定
+  - [ ] デプロイされたAPIエンドポイントの動作確認
+  - [ ] フロントエンドからの接続先URL変更
 
 ## バグ修正
 - [ ] 現在特になし

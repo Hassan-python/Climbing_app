@@ -1,0 +1,51 @@
+steps:
+- name: 'gcr.io/cloud-builders/docker'
+  entrypoint: 'bash'
+  args:
+  - '-c'
+  - |
+    docker build -t 'asia-northeast1-docker.pkg.dev/climbing-application-458609/my-fastapi-repo/my-fastapi-app:latest' -f - . <<DOCKERFILE
+    # Pythonの公式イメージをベースイメージとして使用
+    FROM python:3.10-slim
+
+    # 環境変数を設定
+    ENV PYTHONDONTWRITEBYTECODE 1
+    ENV PYTHONUNBUFFERED 1
+    ENV PORT 8000 # Cloud Runがリッスンするポート
+
+    # 作業ディレクトリを設定
+    WORKDIR /app
+
+    # ★★★ デバッグ用: ビルドコンテキストのルートとWORKDIR設定直後の内容を表示 ★★★
+    RUN echo "--- Content of / (build context root expected here by COPY) ---" && ls -la /
+    RUN echo "--- Content of /app (WORKDIR after setup) ---" && ls -la .
+
+    # 依存関係ファイルとパッケージリストをコピー
+    # これらはビルドコンテキストのルートからコピーされると想定
+    COPY requirements_gcp.txt .
+    COPY packages.txt .
+
+    # packages.txt に記載されたシステムライブラリをインストール
+    RUN apt-get update && \
+        apt-get install -y --no-install-recommends $(cat packages.txt | grep -v '^#') && \
+        rm -rf /var/lib/apt/lists/*
+
+    # Pythonの依存関係をインストール
+    RUN pip install --no-cache-dir -r requirements_gcp.txt
+    
+    # ★★★ デバッグ用: Pythonパッケージインストール後の/appの内容 ★★★
+    RUN echo "--- Content of /app (WORKDIR after pip install) ---" && ls -la .
+
+    # アプリケーションコードをコピー
+    # これらもビルドコンテキストのルートからコピーされると想定
+    COPY main.py .
+    COPY load_knowledge.py .
+
+    # ★★★ デバッグ用: アプリケーションコードコピー後の/appの内容 ★★★
+    RUN echo "--- Content of /app (WORKDIR after app code copy) ---" && ls -la .
+
+    # アプリケーションを実行
+    CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+    DOCKERFILE
+images:
+- 'asia-northeast1-docker.pkg.dev/climbing-application-458609/my-fastapi-repo/my-fastapi-app:latest' 

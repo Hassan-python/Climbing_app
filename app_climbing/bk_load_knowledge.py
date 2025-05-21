@@ -4,7 +4,7 @@ import argparse
 import yaml # YAML読み込みのために追加
 from langchain_community.document_loaders import DirectoryLoader, TextLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from langchain_openai import OpenAIEmbeddings
 from langchain_community.vectorstores import Chroma
 import chromadb
 import chromadb.config
@@ -21,7 +21,6 @@ KNOWLEDGE_BASE_DIR = os.path.join(SCRIPT_DIR, "knowledge_base") # スクリプ�
 # CHROMA_DB_PATH = "./chroma_db" # ローカルパスは使わない
 CHROMA_COLLECTION_NAME = "bouldering_advice"
 SECRETS_FILE_PATH = os.path.join(SCRIPT_DIR, "secrets.yaml") # こちらもスクリプトからの相対パスに
-GEMINI_EMBEDDING_MODEL = "models/embedding-001" # Gemini Embedding モデル名
 
 # --- YAMLファイルから設定を読み込み環境変数に設定する関数 ---
 def load_secrets_from_yaml(file_path=SECRETS_FILE_PATH):
@@ -33,16 +32,16 @@ def load_secrets_from_yaml(file_path=SECRETS_FILE_PATH):
                 print(f"警告: {file_path} が空か、無効なYAML形式です。", file=sys.stderr)
                 return
 
-            # Gemini APIキーを設定 (secrets['google']['gemini_api_key'] が存在すれば)
-            gemini_key = secrets.get('google', {}).get('gemini_api_key')
-            if gemini_key:
-                if "GEMINI_API_KEY" not in os.environ:
-                    os.environ["GEMINI_API_KEY"] = gemini_key
-                    print(f"{file_path} から Gemini APIキーを環境変数に設定しました。")
+            # OpenAI APIキーを設定 (secrets['openai']['api_key'] が存在すれば)
+            openai_key = secrets.get('openai', {}).get('api_key')
+            if openai_key:
+                if "OPENAI_API_KEY" not in os.environ:
+                    os.environ["OPENAI_API_KEY"] = openai_key
+                    print(f"{file_path} から OpenAI APIキーを環境変数に設定しました。")
                 else:
-                    print(f"環境変数 GEMINI_API_KEY は既に設定されています。{file_path} の値は使用しません。")
+                    print(f"環境変数 OPENAI_API_KEY は既に設定されています。{file_path} の値は使用しません。")
             else:
-                print(f"警告: {file_path} に Gemini API キー ('google.gemini_api_key') が見つかりません。", file=sys.stderr)
+                print(f"警告: {file_path} に OpenAI API キー ('openai.api_key') が見つかりません。", file=sys.stderr)
 
             # ChromaDB URLを設定 (secrets['chromadb']['url'] が存在すれば)
             chromadb_url = secrets.get('chromadb', {}).get('url')
@@ -82,8 +81,8 @@ def get_env_or_secret(key_name, secret_section, secret_key):
             print(f"警告: Streamlit Secrets の読み込みに失敗しました ({e})。環境変数 {key_name} を設定してください。", file=sys.stderr)
             return None
 
-def get_gemini_api_key():
-    return get_env_or_secret("GEMINI_API_KEY", "google", "gemini_api_key")
+def get_openai_api_key():
+    return get_env_or_secret("OPENAI_API_KEY", "openai", "api_key")
 
 def get_chromadb_url():
     return get_env_or_secret("CHROMA_DB_URL", "chromadb", "url")
@@ -117,11 +116,11 @@ def split_documents(documents):
 
 # --- データロード関数 (HttpClientを使うように変更) ---
 def load_and_store_knowledge_http(mode='replace'):
-    gemini_api_key = get_gemini_api_key()
+    openai_api_key = get_openai_api_key()
     chromadb_url = get_chromadb_url()
 
-    if not gemini_api_key or not chromadb_url:
-        print("エラー: Gemini APIキー または ChromaDB URL が取得できませんでした。環境変数または secrets.yaml を確認してください。", file=sys.stderr)
+    if not openai_api_key or not chromadb_url:
+        print("エラー: OpenAI APIキー または ChromaDB URL が取得できませんでした。環境変数または secrets.toml を確認してください。", file=sys.stderr)
         return False
 
     # --- 1. ドキュメントの読み込みと分割 ---
@@ -133,7 +132,7 @@ def load_and_store_knowledge_http(mode='replace'):
     # --- 2. Embeddingモデルの初期化 ---
     print("Embeddingモデルを初期化中...")
     try:
-        embeddings = GoogleGenerativeAIEmbeddings(model=GEMINI_EMBEDDING_MODEL, google_api_key=gemini_api_key)
+        embeddings = OpenAIEmbeddings(openai_api_key=openai_api_key)
     except Exception as e:
         print(f"Embeddingモデルの初期化中にエラーが発生しました: {e}", file=sys.stderr)
         return False
@@ -173,17 +172,12 @@ def load_and_store_knowledge_http(mode='replace'):
         if not texts:
              print("knowledge_base にドキュメントがないため、空のコレクションを作成します。")
              try:
-                 # メタデータで embedding 関数名とモデルを指定する
-                 collection_metadata = {
-                     "embedding_function_name": "GoogleGenerativeAIEmbeddings",
-                     "embedding_model_name": GEMINI_EMBEDDING_MODEL
-                     # "embedding_dimension": 768 # Langchainが自動で設定するはずなので、必須ではない
-                 }
+                 # メタデータで embedding 関数名を指定する (OpenAIEmbeddingsのデフォルトモデル名)
                  collection = client.get_or_create_collection(
                      name=CHROMA_COLLECTION_NAME,
-                     metadata=collection_metadata
+                     metadata={"embedding_function": "text-embedding-ada-002"} # OpenAIのデフォルトを指定
                  )
-                 print(f"空のコレクション '{CHROMA_COLLECTION_NAME}' をメタデータ {collection_metadata} 付きで作成しました。")
+                 print(f"空のコレクション '{CHROMA_COLLECTION_NAME}' を作成しました。")
                  return True
              except Exception as e:
                  print(f"空のコレクション作成中にエラーが発生しました: {e}", file=sys.stderr)
@@ -246,19 +240,18 @@ if __name__ == "__main__":
     print(f"--- 知識ベース読み込み・格納スクリプト開始 (モード: {args.mode}, 接続先: リモート ChromaDB) ---")
 
     # APIキー/URLの存在チェック
-    gemini_key = get_gemini_api_key()
+    openai_key = get_openai_api_key()
     chroma_url = get_chromadb_url()
-    if not gemini_key:
-         print("終了: Gemini APIキーが必要です。環境変数 GEMINI_API_KEY または secrets.yaml を設定してください。")
+    if not openai_key:
+         print("終了: OpenAI APIキーが必要です。環境変数 OPENAI_API_KEY または secrets.toml を設定してください。")
          sys.exit(1)
     if not chroma_url:
-         print("終了: ChromaDB URLが必要です。環境変数 CHROMA_DB_URL または secrets.yaml を設定してください。")
+         print("終了: ChromaDB URLが必要です。環境変数 CHROMA_DB_URL または secrets.toml を設定してください。")
          sys.exit(1)
 
     # Streamlit Secrets に依存しないように環境変数名を明記
     print("使用する設定:")
-    print(f"  Gemini API Key: {'設定済み' if gemini_key else '未設定'}")
-    print(f"  Gemini Embedding Model: {GEMINI_EMBEDDING_MODEL}")
+    print(f"  OpenAI API Key: {'設定済み' if openai_key else '未設定'}")
     print(f"  ChromaDB URL: {chroma_url if chroma_url else '未設定'}")
     print(f"  コレクション名: {CHROMA_COLLECTION_NAME}")
     print(f"  知識ベースディレクトリ: {KNOWLEDGE_BASE_DIR}")
